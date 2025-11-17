@@ -1,0 +1,124 @@
+# Global configuration (UTC based)
+
+# 交易品种列表
+symbols:
+  - BTCUSDT
+  - ETHUSDT
+
+timeframes:
+  lookback_bars: 320          # 各周期最多保留的K线数量
+  filter_fast: 30m            # 快周期，用于计算特征/ATR
+  filter_slow: 1h             # 慢周期，用于特征/ATR
+  eth_aux: 15m                # ETH 辅助周期
+  defs:                       # 各周期定义（分钟、ATR/成交量异常阈值）
+    1d:
+      minutes: 1440
+      atr_spike: 5.0
+      volume_jump: 5.0
+    4h:
+      minutes: 240
+      atr_spike: 4.0
+      volume_jump: 4.0
+    1h:
+      minutes: 60
+      atr_spike: 3.5
+      volume_jump: 3.0
+    30m:
+      minutes: 30
+      atr_spike: 3.0
+      volume_jump: 2.5
+    15m:
+      minutes: 15
+      atr_spike: 2.8
+      volume_jump: 2.3
+
+market_filter:
+  # 活跃度阈值（AI版已不再限制，仅保留字段）
+  score_thresholds:
+    BTCUSDT: 0.55
+    ETHUSDT: 0.72
+  weights:
+    atr_norm: 0.4
+    bb_width_norm: 0.35
+    vol_change_norm: 0.25
+  smoothing_weights:
+    fast: 0.7
+    slow: 0.3
+  silent:
+    low_vol_consecutive: 3
+    resume_consecutive: 2
+
+risk:
+  risk_per_trade: 0.01        # 单笔风险占净值比例（AI仓位不指定时的兜底算法）
+  rr_bounds:
+    min: 1.5
+    max: 5.0
+  sl_atr_mult: 1.5
+  tp_atr_mult: 3.0
+  stop_buffer_pct: 0.015
+  stop_atr_cap: 3.0
+  trade_type_modifiers:       # 交易类型参数（AI自主版大多已不生效，仅留作参考）
+    trend: { position_scale: 1.0, min_confidence: 75, min_rr: 1.5, stop_atr_mult: 3.0 }
+    reverse_minor: { position_scale: 0.7, min_confidence: 80, min_rr: 3.0, stop_atr_mult: 4.0 }
+    reverse_major: { position_scale: 0.5, min_confidence: 85, min_rr: 4.0, stop_atr_mult: 4.0 }
+
+signals:
+  cooldown_minutes: 30        # 信号冷却（AI版已放开）
+  review_interval_minutes: 60 # 复评最小间隔
+  review_price_atr: 0.8       # 价格偏离触发复评的 ATR 倍数
+  review_max_context: 5       # 复评上下文轮次
+  expiry_hours:               # 不同市场模式下的信号过期时间
+    trending: 6
+    channeling: 6
+    ranging: 4
+    breakout: 2
+    reversal: 3
+  max_same_direction: 1       # 同向允许的最大活跃信号数（AI版已放开）
+
+deepseek:
+  enabled: true
+  model: deepseek-chat
+  review_model: deepseek-chat
+  api_base: https://api.deepseek.com
+  timeout: 30
+  temperature: 0.1
+  max_tokens: 2000
+  stream: false
+  budget:
+    daily_tokens: 200000      # 每日 token 上限
+    warn_ratio: 0.8           # 预警比例
+  retry:
+    max_attempts: 3
+    backoff_seconds: 1.5
+
+exchange:
+  name: binance               # 交易所
+  type: futures               # 现货/合约
+  rate_limit: true            # 是否打开限频
+
+backtest:
+  initial_equity: 10000        # 初始资金
+  fee_rate: 0.0004            # 手续费率
+
+database:
+  enabled: true
+  dsn: sqlite:///state/coin_dash_se.db
+  pool_size: 5
+  echo: false
+  auto_migrate: true
+
+performance:
+  report_hour_utc8: 23
+  safe_mode:
+    consecutive_stop_losses: 5  # 安全模式触发阈值（AI版默认已不启用）
+  adaptive_thresholds:           # 自适应阈值设置（AI版已关闭阈值调整）
+    profit_factor_min: 1.1
+    win_rate_min: 0.35
+    avg_rr_min: 1.3
+    threshold_adjustment: 0.1
+
+notifications:
+  lark_webhook: ""            # 飞书 Webhook（优先 .env）
+
+log:
+  level: DEBUG                # 日志级别

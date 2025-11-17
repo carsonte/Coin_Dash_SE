@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "coin-dash"
+version = "0.1.0"
+description = "Coin Dash: Modular crypto trading framework with AI decision adapter"
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+packages = [{ include = "coin_dash" }]
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.13"
+pandas = "^2.2.2"
+numpy = "^1.26.0"
+pydantic = "^2.8.2"
+PyYAML = "^6.0.2"
+requests = "^2.32.3"
+rich = "^13.7.1"
+ccxt = "^4.4.12"
+python-dotenv = "^1.0.1"
+SQLAlchemy = "^2.0.31"
+psycopg = { version = "^3.2.1", extras = ["binary"] }
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.3"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
