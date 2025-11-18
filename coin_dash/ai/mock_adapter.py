@@ -21,7 +21,7 @@ def decide_mock(symbol: str, feats: Dict[str, float], cfg: Dict) -> Decision:
         sl = max(0.0, entry - sl_mult * atr)
         tp = entry + tp_mult * atr
         rr = (tp - entry) / max(1e-9, entry - sl)
-        return Decision(
+        decision = Decision(
             "open_long",
             entry,
             sl,
@@ -32,13 +32,15 @@ def decide_mock(symbol: str, feats: Dict[str, float], cfg: Dict) -> Decision:
             position_size=cfg.get("mock_position_size", 1.0),
             meta={"symbol": symbol, "adapter": "mock"},
         )
+        decision.recompute_rr()
+        return decision
 
     if price < e20 < e60 and rsi > 20:
         entry = price
         sl = entry + sl_mult * atr
         tp = entry - tp_mult * atr
         rr = (entry - tp) / max(1e-9, sl - entry)
-        return Decision(
+        decision = Decision(
             "open_short",
             entry,
             sl,
@@ -49,6 +51,8 @@ def decide_mock(symbol: str, feats: Dict[str, float], cfg: Dict) -> Decision:
             position_size=cfg.get("mock_position_size", 1.0),
             meta={"symbol": symbol, "adapter": "mock"},
         )
+        decision.recompute_rr()
+        return decision
 
     return Decision(
         "hold",

@@ -172,6 +172,17 @@ def send_signal_card(webhook: str, record: "SignalRecord", correlated: bool = Fa
         "reverse_major": "逆大势",
         "unknown": "未分类",
     }
+    # 重新按价差计算盈亏比，确保与止盈/止损一致
+    entry = decision.entry_price
+    stop = decision.stop_loss
+    take = decision.take_profit
+    if decision.decision == "open_long":
+        risk = max(1e-9, entry - stop)
+        reward = max(0.0, take - entry)
+    else:
+        risk = max(1e-9, stop - entry)
+        reward = max(0.0, entry - take)
+    rr = reward / risk if risk > 0 else 0.0
     position_hint = {
         "trend": "标准仓位",
         "reverse_minor": "轻仓",
@@ -197,9 +208,9 @@ def send_signal_card(webhook: str, record: "SignalRecord", correlated: bool = Fa
             "tag": "column_set",
             "flex_mode": "none",
             "columns": [
-                _column("RR", f"{decision.risk_reward:.2f}"),
+                _column("RR", f"{rr:.2f}"),
                 _column("置信度", f"{decision.confidence:.1f}"),
-                _column("有效期", record.expires_at.strftime("%m-%d %H:%M UTC")),
+                _column("有效期", _fmt_local(record.expires_at, "%m-%d %H:%M UTC+8")),
                 _column("AI仓位", f"{getattr(decision, 'position_size', 0.0):.4f}"),
             ],
         },

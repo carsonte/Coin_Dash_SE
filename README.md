@@ -20,6 +20,12 @@ pip install -r requirements.txt  # 如未生成，可按 pyproject/poetry.lock �
 - 实时单次：`python -m coin_dash.cli live --symbols BTCUSDT`
 - 飞书卡片自检：`python -m coin_dash.cli cards-test --symbol BTCUSDT`
 
+更新记录（当前版）
+--------
+- DeepSeek token 预算拦截与警告已移除，调用量不再限制。
+- 飞书信号卡片时间改为 UTC+8 展示，便于本地查看。
+- 盈亏比（RR）在决策对象与卡片展示中统一按入场/止盈/止损实算，避免模型返回与价格不一致。
+
 关键改动
 --------
 - 删除市场活跃度过滤、静默、RR/止损距离/仓位倍率等校验，AI 输出即执行。

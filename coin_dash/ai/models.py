@@ -16,6 +16,25 @@ class Decision:
     position_size: float = 0.0
     meta: Dict[str, Any] = field(default_factory=dict)
 
+    def recompute_rr(self) -> float:
+        """
+        Recalculate RR based on entry/stop/take to avoid inconsistencies with model output.
+        """
+        entry = self.entry_price
+        stop = self.stop_loss
+        take = self.take_profit
+        rr = 0.0
+        if self.decision == "open_long":
+            risk = max(1e-9, entry - stop)
+            reward = max(0.0, take - entry)
+            rr = reward / risk if risk > 0 else 0.0
+        elif self.decision == "open_short":
+            risk = max(1e-9, stop - entry)
+            reward = max(0.0, entry - take)
+            rr = reward / risk if risk > 0 else 0.0
+        self.risk_reward = rr
+        return rr
+
 
 @dataclass
 class ReviewDecision:

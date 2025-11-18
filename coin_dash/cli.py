@@ -62,7 +62,6 @@ from .ai.models import Decision
 
 
 
-from .ai.usage_tracker import BudgetExceeded, BudgetInfo
 
 
 
@@ -332,15 +331,10 @@ def cmd_live(args: argparse.Namespace) -> None:
 
 
 
-    # 涓枃璇存槑锟?
-
-    # 褰撳惎锟?--align 鏃讹紝live 寰幆浼氣€滃榻愬埌鍛ㄦ湡杈圭晫鈥濓紙渚嬪 15/30/60 鍒嗛挓鏁寸偣锛夛紝
-
-
-
-    # 骞跺湪杈圭晫鍚庣殑瀵归綈鍋忕Щ绉掞紙--align-skew锛夊悗鍐嶆墽琛屼竴娆★紝浠ョ‘淇滽绾垮凡鏀剁洏钀界洏锟?
-
-    # 鏈惎鐢ㄦ椂锛屼粛鎸夊浐锟?--interval 绉掓暟鐫＄湢锟?
+    # 中文说明：
+    # 开启 --align 时，live 循环会对齐到周期边界（如 15/30/60 分钟整点），
+    # 在边界后的偏移（--align-skew）再执行一次，确保行情/特征已刷新；
+    # 如果未开启，对齐逻辑关闭，按 --interval 秒数常规轮询。
 
 
 
@@ -376,7 +370,7 @@ def cmd_live(args: argparse.Namespace) -> None:
 
 
 
-        raise ValueError(f"鏃犳硶瑙ｆ瀽鍛ㄦ湡鏍囩: {label}")
+        raise ValueError(f"无法解析周期标签: {label}")
 
 
 
@@ -390,7 +384,7 @@ def cmd_live(args: argparse.Namespace) -> None:
 
 
 
-        # 锟?UTC 璁＄畻涓嬩竴鍛ㄦ湡杈圭晫鍒嗛挓
+        # 按 UTC 计算下一周期边界分钟
 
 
 
@@ -446,7 +440,7 @@ def cmd_live(args: argparse.Namespace) -> None:
 
 
 
-                    # 涓枃锟? 鍒嗛挓蹇冭烦锛涘湪鈥滃父瑙勫璇勯棿闅旓紙signals.review_interval_minutes锛夆€濈殑鏁寸偣杈圭晫鎵ц瀹屾暣鍛ㄦ湡
+                    # 中文：在复评间隔（signals.review_interval_minutes）的整数边界跑完整周期，其余时间跑轻量心跳
 
 
 
@@ -454,7 +448,7 @@ def cmd_live(args: argparse.Namespace) -> None:
 
 
 
-                    period = max(5, int(cfg.signals.review_interval_minutes))  # 榛樿 60 鍒嗛挓鍙敱閰嶇疆鎺у埗
+                    period = max(5, int(cfg.signals.review_interval_minutes))  # 默认 60 分钟，可通过配置调整
 
 
 
@@ -462,17 +456,17 @@ def cmd_live(args: argparse.Namespace) -> None:
 
 
 
-                        orchestrator.run_cycle(target)  # 甯歌澶嶈瘎 + 鏂颁俊锟?
+                        orchestrator.run_cycle(target)  # 全量复评 + 新信号生成
 
                     else:
 
 
 
-                        orchestrator.run_heartbeat(target)  # 5m 蹇冭烦锛氬競锟?TP/SL/涓存椂澶嶈瘎
+                        orchestrator.run_heartbeat(target)  # 5m 心跳：检查 TP/SL / 临时复评
 
 
 
-                    # 瀵归綈鍒颁笅涓€锟?5 鍒嗛挓杈圭晫锟?3s 缂撳啿
+                    # 对齐到下一个 5 分钟边界，并加 3s 缓冲
 
 
 
@@ -530,7 +524,7 @@ def cmd_cards_test(args: argparse.Namespace) -> None:
 
 
 
-        raise SystemExit("璇峰厛璁剧疆 Lark Webhook")
+        raise SystemExit("请先设置 Lark Webhook")
 
 
 
@@ -990,11 +984,7 @@ def cmd_deepseek_test(args: argparse.Namespace) -> None:
     cfg = load_config(args.config)
     _apply_notification_config(cfg)
 
-    def budget_log(info: BudgetInfo) -> None:
-        level = 'warn' if info.level == 'warn' else 'exceed'
-        print(f"[yellow]DeepSeek budget {level}: {info.total_tokens}/{info.budget} tokens (date {info.date})[/yellow]")
-
-    client = DeepSeekClient(cfg.deepseek, budget_callback=budget_log)
+    client = DeepSeekClient(cfg.deepseek)
     if not client.enabled():
         raise SystemExit("DeepSeek 未启用或缺少 DEEPSEEK_API_KEY，请在 .env/config 设置并启用 deepseek.enabled=true")
 
@@ -1020,10 +1010,6 @@ def cmd_deepseek_test(args: argparse.Namespace) -> None:
     print('[cyan]调用 DeepSeek 决策接口...[/cyan]')
     try:
         decision = client.decide_trade(args.symbol, decision_payload)
-    except BudgetExceeded as exc:
-        info = exc.info
-        print(f"[red]决策触发预算超限：{info.total_tokens}/{info.budget}（{info.date}）[/red]")
-        return
     except Exception as exc:
         print(f"[red]DeepSeek 调用失败: {exc}")
         return
@@ -1052,12 +1038,7 @@ def cmd_deepseek_test(args: argparse.Namespace) -> None:
             },
         }
         print('[cyan]调用 DeepSeek 复评接口...[/cyan]')
-        try:
-            review = client.review_position(args.symbol, 'test-position', review_payload)
-        except BudgetExceeded as exc:
-            info = exc.info
-            print(f"[red]复评触发预算超限：{info.total_tokens}/{info.budget}（{info.date}）[/red]")
-            return
+        review = client.review_position(args.symbol, 'test-position', review_payload)
         print(f"[green]复评成功[/green]: action={review.action}, reason={review.reason}")
 
     print('[bold green]DeepSeek API 测试完成[/bold green]')
@@ -1092,7 +1073,7 @@ def cmd_healthcheck(args: argparse.Namespace) -> None:
 
 
 
-    # Lark 杩為€氭€ф祴锟?
+    # Lark 连通性预检
 
     lark_ok = False
 
@@ -1135,7 +1116,7 @@ def cmd_healthcheck(args: argparse.Namespace) -> None:
 
 
 
-    # DeepSeek 杩為€氾拷?
+    # DeepSeek 连通性预检
 
     deepseek_status: bool | None = None
 
@@ -1173,7 +1154,7 @@ def cmd_healthcheck(args: argparse.Namespace) -> None:
 
 
 
-            deepseek_detail = "鏈厤锟?DEEPSEEK_API_KEY 鎴栫幆澧冨彉閲忎笉鍙敤"
+            deepseek_detail = "未配置 DEEPSEEK_API_KEY，或环境变量不可用"
 
 
 
@@ -1269,22 +1250,6 @@ def cmd_healthcheck(args: argparse.Namespace) -> None:
 
 
 
-            except BudgetExceeded as exc:
-
-
-
-                info = exc.info
-
-
-
-                deepseek_status = False
-
-
-
-                deepseek_detail = f"预算超限：{info.total_tokens}/{info.budget}（{info.date}）"
-
-
-
             except Exception as exc:  # noqa: BLE001
 
 
@@ -1305,7 +1270,7 @@ def cmd_healthcheck(args: argparse.Namespace) -> None:
 
 
 
-    # 杈撳嚭鍒扮粓锟?
+    # 输出到终端
 
     for item in checks:
 
@@ -1327,7 +1292,7 @@ def cmd_healthcheck(args: argparse.Namespace) -> None:
 
 
 
-    # 姹囨€诲崱鐗囷紝浠呭綋 webhook 娴嬭瘯鎴愬姛鎵嶆帹锟?
+    # 仅在 webhook 测试成功时推送自检卡片
 
     if lark_ok:
 
@@ -1337,11 +1302,11 @@ def cmd_healthcheck(args: argparse.Namespace) -> None:
 
 
 
-            send_healthcheck_card(webhook, "閮ㄧ讲鑷缁撴灉", checks)
+            send_healthcheck_card(webhook, "全量自检结果", checks)
 
 
 
-            print("[green]宸插彂閫侀儴缃茶嚜妫€鍗＄墖锟?Lark銆俒/green]")
+            print("[green]已发送部署自检卡片到 Lark[/green]")
 
         except Exception as exc:  # noqa: BLE001
 
@@ -1355,7 +1320,7 @@ def cmd_healthcheck(args: argparse.Namespace) -> None:
 
 
 
-        print("[yellow]Lark Webhook 娴嬭瘯鏈€氳繃锛岃烦杩囩粨鏋滃崱鐗囨帹閫併€俒/yellow]")
+        print("[yellow]Lark Webhook 测试未通过，暂不发送自检卡片[/yellow]")
 
 
 
@@ -1417,7 +1382,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 
-    p_backtest = sub.add_parser("backtest", help="杩愯鏈湴 CSV 鍥炴祴")
+    p_backtest = sub.add_parser("backtest", help="运行本地 CSV 回测")
 
 
 
@@ -1437,7 +1402,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 
-    p_backtest.add_argument("--deepseek", action="store_true", help="鍚敤 DeepSeek 鍐崇瓥")
+    p_backtest.add_argument("--deepseek", action="store_true", help="启用 DeepSeek 决策")
 
 
 
@@ -1490,7 +1455,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 
-    p_deepseek = sub.add_parser("deepseek-test", help="娴嬭瘯 DeepSeek 鍐崇瓥/澶嶈瘎鎺ュ彛")
+    p_deepseek = sub.add_parser("deepseek-test", help="测试 DeepSeek 决策/复评接口")
 
 
 
@@ -1502,7 +1467,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 
-    p_deepseek.add_argument("--review", action="store_true", default=False, help="鍚屾椂娴嬭瘯澶嶈瘎鎺ュ彛")
+    p_deepseek.add_argument("--review", action="store_true", default=False, help="同时测试复评接口")
 
 
 
@@ -1510,13 +1475,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 
-    p_health = sub.add_parser("healthcheck", help="閮ㄧ讲鑷锛氬悓鏃堕獙锟?Lark Webhook 锟?DeepSeek API")
+    p_health = sub.add_parser("healthcheck", help="全量自检：同时校验 Lark Webhook 和 DeepSeek API")
 
     p_health.add_argument("--symbol", default="BTCUSDT")
 
     p_health.add_argument("--config", type=Path, default=None)
 
-    p_health.add_argument("--webhook", default=None, help="鍙€夛細鏄惧紡瑕嗙洊閰嶇疆涓殑 Lark Webhook")
+    p_health.add_argument("--webhook", default=None, help="可选：临时覆盖配置中的 Lark Webhook")
 
     p_health.set_defaults(func=cmd_healthcheck)
 

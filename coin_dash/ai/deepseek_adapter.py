@@ -3,16 +3,13 @@ from __future__ import annotations
 import json
 import os
 import time
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import requests
 
 from ..config import DeepSeekCfg
 from .context import ConversationManager
 from .models import Decision, ReviewDecision
-from .usage_tracker import AIUsageTracker, BudgetExceeded, BudgetInfo
-
 if TYPE_CHECKING:
     from ..db.ai_decision_logger import AIDecisionLogger
 
@@ -22,7 +19,6 @@ class DeepSeekClient:
         self,
         cfg: DeepSeekCfg,
         conversation: Optional[ConversationManager] = None,
-        budget_callback: Optional[Callable[[BudgetInfo], None]] = None,
         decision_logger: Optional["AIDecisionLogger"] = None,
     ) -> None:
         self.cfg = cfg
@@ -30,9 +26,6 @@ class DeepSeekClient:
         self.conversation = conversation or ConversationManager()
         self.api_key = os.getenv("DEEPSEEK_API_KEY")
         self.api_base = os.getenv("DEEPSEEK_API_BASE", cfg.api_base).rstrip("/")
-        state_dir = Path(__file__).resolve().parents[1] / "state"
-        self.usage_tracker = AIUsageTracker(cfg.budget.daily_tokens, cfg.budget.warn_ratio, state_dir / "ai_usage.json")
-        self.budget_callback = budget_callback
         self.ai_logger = decision_logger
 
     def enabled(self) -> bool:
@@ -117,7 +110,7 @@ class DeepSeekClient:
                 tokens_used,
                 latency_ms,
             )
-        return Decision(
+        decision = Decision(
             decision=data.get("decision", "hold"),
             entry_price=float(data.get("entry_price", 0.0)),
             stop_loss=float(data.get("stop_loss", 0.0)),
@@ -128,6 +121,8 @@ class DeepSeekClient:
             position_size=self._to_float(data.get("position_size")) or 0.0,
             meta=data,
         )
+        decision.recompute_rr()
+        return decision
 
     def review_position(self, symbol: str, position_id: str, payload: Dict[str, Any]) -> ReviewDecision:
         note = payload.get("context_note") or f"review request for {symbol}"
@@ -216,17 +211,8 @@ class DeepSeekClient:
                 duration_ms = (time.perf_counter() - start) * 1000
                 data = resp.json()
                 tokens = data.get("usage", {}).get("total_tokens", 0)
-                warn_info, exceed_info = self.usage_tracker.record(user_payload.get("task", "unknown"), tokens, duration_ms)
-                if warn_info and self.budget_callback:
-                    self.budget_callback(warn_info)
-                if exceed_info:
-                    if self.budget_callback:
-                        self.budget_callback(exceed_info)
-                    raise BudgetExceeded(exceed_info)
                 content = data["choices"][0]["message"]["content"]
                 return content, tokens, duration_ms
-            except BudgetExceeded:
-                raise
             except requests.HTTPError as exc:
                 last_exc = exc
                 status = exc.response.status_code if exc.response is not None else None

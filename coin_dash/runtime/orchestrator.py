@@ -28,7 +28,6 @@ from ..notify.lark import (
 )
 from ..ai.deepseek_adapter import DeepSeekClient
 from ..ai.safe_fallback import apply_fallback
-from ..ai.usage_tracker import BudgetInfo, BudgetExceeded
 from ..verify.validator import ValidationContext, validate_signal
 from ..risk.position import position_size
 from ..signals.manager import SignalManager, SignalRecord
@@ -48,11 +47,7 @@ class LiveOrchestrator:
         self.fetcher = LiveDataFetcher(cfg)
         self.pipeline = DataPipeline(cfg)
         decision_logger = db_services.ai_logger if (db_services and db_services.ai_logger) else None
-        self.deepseek = DeepSeekClient(
-            cfg.deepseek,
-            budget_callback=self._handle_budget_event,
-            decision_logger=decision_logger,
-        )
+        self.deepseek = DeepSeekClient(cfg.deepseek, decision_logger=decision_logger)
         self.webhook = webhook or cfg.notifications.lark_webhook
         self.state = StateManager(STATE_PATH)
         self.signal_manager = SignalManager(cfg.signals)
@@ -313,8 +308,6 @@ class LiveOrchestrator:
         }
         try:
             decision = self.deepseek.review_position(symbol, position.id, payload)
-        except BudgetExceeded:
-            return
         except Exception:
             decision = None
         if not decision or decision.action == "hold":
@@ -437,21 +430,6 @@ class LiveOrchestrator:
         send_anomaly_card(self.webhook, payload)
         if self.db and self.db.system_monitor:
             self.db.system_monitor.record_event("anomaly", "high", message, {"impact": impact})
-
-    def _handle_budget_event(self, info: BudgetInfo) -> None:
-        severity = "中" if info.level == "warn" else "高"
-        payload = AnomalyAlertPayload(
-            event_type="DeepSeek Token 预算",
-            severity=severity,
-            occurred_at=datetime.now(timezone.utc),
-            impact=f"{info.total_tokens}/{info.budget} tokens（日期 {info.date}）",
-            status="警告" if info.level == "warn" else "暂停AI决策",
-            actions="请检查预算配置或改用Mock" if info.level == "exceed" else "关注当日调用频率",
-        )
-        send_anomaly_card(self.webhook, payload)
-        if self.db and self.db.ai_logger:
-            status = "warn" if info.level == "warn" else "exceed"
-            self.db.ai_logger.log_cost("deepseek", info.total_tokens, status)
 
     def _persist_safe_mode(self) -> None:
         if self.safe_mode:
