@@ -44,49 +44,11 @@ class DeepSeekClient:
     def decide_trade(self, symbol: str, payload: Dict[str, Any]) -> Decision:
         context = self.conversation.get_context(f"open:{symbol}", symbol)
         shared = self.conversation.get_shared_context()
+        prompt_text = self._build_trade_prompt(symbol, payload, context, shared)
         content, tokens_used, latency_ms = self._chat_completion(
             model=self.cfg.model,
-            system_prompt=(
-                "You are a professional-level crypto trading AI operating in SE mode.\n"
-                "Reply strictly in JSON.\n"
-                "All explanations must be in Simplified Chinese.\n"
-                "You have full autonomy to decide entries, stop loss, take profit, risk-reward, and position size.\n\n"
-                "You will receive multi-timeframe OHLCV, indicators, trend slopes, environment labels, and global market temperature.\n"
-                "You will also receive raw OHLCV sequences for 30m (last 50 bars), 1h (last 40 bars), and 4h (last 30 bars) so you can visualize price structure.\n"
-                "Use these sequences to reason about consolidation width, breakout quality, momentum shifts, and stop placement.\n\n"
-                "You MUST explicitly use:\n"
-                "- trend_slope fields (ema20_slope, ema60_slope, macd_hist_slope, rsi_trend, atr_trend, bb_width_trend)\n"
-                "- environment (volatility, regime, noise_level, liquidity)\n"
-                "- global_temperature (risk level, correlation, temperature)\n"
-                "to evaluate trend strength, volatility regime, and risk conditions.\n"
-                "You MUST reference the raw OHLCV sequences when judging trend changes or fake breakouts.\n\n"
-                "You must explain in Chinese why you open/hold/close based on these fields.\n\n"
-                "Output JSON with:\n"
-                "decision, entry_price, stop_loss, take_profit, risk_reward, confidence, reason, position_size."
-            ),
-            user_payload={
-                "task": "trade_decision",
-                "symbol": symbol,
-                "data": payload,
-                "context": context,
-                "shared_memory": shared,
-                "environment": payload.get("environment"),
-                "global_temperature": payload.get("global_temperature"),
-                "recent_ohlc": payload.get("recent_ohlc"),
-                "user_guidance": "请结合 trend_slope、environment、global_temperature 以及 recent_ohlc 多周期原始序列来判断趋势结构、突破有效性、震荡宽度与动能变化，再决定止损、止盈和仓位大小。",
-                "format": {
-                    "decision": "open_long|open_short|hold",
-                    "entry_price": "float",
-                    "stop_loss": "float",
-                    "take_profit": "float",
-                    "risk_reward": "float",
-                    "confidence": "0-100",
-                    "reason": "string (Simplified Chinese rationale for the trade)",
-                    "position_size": "float (contract/lot size to open; you decide the size)",
-                },
-                "language": "zh-CN",
-                "notes": "Ensure the `reason` field is a concise Simplified Chinese explanation. You control sizing.",
-            },
+            system_prompt=self._instruction_header(),
+            user_content=prompt_text,
         )
         data = self._parse_json(content)
         self.conversation.append(
@@ -133,36 +95,11 @@ class DeepSeekClient:
         self.conversation.append(position_id, symbol, "user", note)
         context = self.conversation.get_context(position_id, symbol)
         shared = self.conversation.get_shared_context()
-        user_payload = {
-            "task": "position_review",
-            "symbol": symbol,
-            "position_id": position_id,
-            "context": context,
-            "shared_memory": shared,
-            "data": payload,
-            "environment": payload.get("environment"),
-            "global_temperature": payload.get("global_temperature"),
-            "recent_ohlc": payload.get("recent_ohlc"),
-            "format": {
-                "action": "close|adjust|hold",
-                "new_stop_loss": "float|null",
-                "new_take_profit": "float|null",
-                "new_rr": "float|null",
-                "reason": "string",
-                "context_summary": "string",
-                "confidence": "0-100",
-            },
-        }
-        user_payload["language"] = "zh-CN"
+        review_prompt = self._build_review_prompt(symbol, payload, context, shared)
         content, tokens_used, latency_ms = self._chat_completion(
             model=self.cfg.review_model,
-            system_prompt=(
-                "You are DeepSeek risk reviewer.\n"
-                "Reply strictly in JSON.\n"
-                "Return all explanations in Simplified Chinese.\n"
-                "You MUST use trend slope changes, environment labels, global market temperature, and the raw multi-timeframe OHLCV sequences (30m/1h/4h) to decide whether the existing position should adjust stop loss, take profit, or close."
-            ),
-            user_payload=user_payload,
+            system_prompt=self._instruction_header(review=True),
+            user_content=review_prompt,
         )
         data = self._parse_json(content)
         self.conversation.append(
@@ -172,7 +109,7 @@ class DeepSeekClient:
             f"review_action={data.get('action')} sl={data.get('new_stop_loss')} tp={data.get('new_take_profit')} rr={data.get('new_rr')} reason={data.get('reason')}",
         )
         if self.ai_logger:
-            self.ai_logger.log_decision("review", symbol, user_payload, data, tokens_used, latency_ms)
+            self.ai_logger.log_decision("review", symbol, payload, data, tokens_used, latency_ms)
         if data.get("context_summary"):
             self.conversation.append(position_id, symbol, "assistant", data["context_summary"])
         return ReviewDecision(
@@ -185,7 +122,7 @@ class DeepSeekClient:
             confidence=float(data.get("confidence", 0.0)),
         )
 
-    def _chat_completion(self, model: str, system_prompt: str, user_payload: Dict[str, Any]) -> Tuple[str, int, float]:
+    def _chat_completion(self, model: str, system_prompt: str, user_content: str) -> Tuple[str, int, float]:
         if not self.enabled():
             raise RuntimeError("DeepSeek not enabled or API key missing")
         url = f"{self.api_base}/v1/chat/completions"
@@ -195,7 +132,7 @@ class DeepSeekClient:
         }
         messages: List[Dict[str, str]] = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+            {"role": "user", "content": user_content},
         ]
         body = {
             "model": model,
@@ -234,6 +171,124 @@ class DeepSeekClient:
         if last_exc:
             raise last_exc
         raise RuntimeError("DeepSeek request failed unexpectedly")
+
+    def _instruction_header(self, review: bool = False) -> str:
+        role = (
+            "You are a professional-level crypto trading AI operating in SE mode."
+            if not review
+            else "You are DeepSeek risk reviewer operating in SE mode."
+        )
+        return (
+            f"{role}\n"
+            "Reply strictly in JSON and keep all explanations in Simplified Chinese.\n"
+            "Stay disciplined, avoid hallucinations, and respect the provided multi-timeframe context."
+        )
+
+    def _instruction_block(self, review: bool = False) -> str:
+        base = (
+            "你将获得多个周期的原始 K 线序列（未经过指标加工）：\n"
+            "- 30 分钟周期：最近 50 根 K 线\n"
+            "- 1 小时周期：最近 40 根 K 线\n"
+            "- 4 小时周期：最近 30 根 K 线\n\n"
+            "每根 K 线包含 open、high、low、close、volume（已做 log10 压缩）。请基于这些序列判断：\n"
+            "- 趋势方向（多/空/震荡）与结构（高低点形态、假突破、震荡宽度）\n"
+            "- 动能变化（加速或衰减）与量价关系（爆量/缩量、配合或背离）\n"
+            "- 支撑/压力是否有效、风险等级、合理的止损/止盈/RR\n"
+            "- 当前是否适合开仓、持仓或观望，并说明理由\n\n"
+            "除了原始序列，还必须结合 trend_slope、environment、global_temperature 等特征综合判断，不能只依赖单一指标。"
+        )
+        if review:
+            return "复评任务说明：\n" + base
+        return base
+
+    def _trade_task_text(self) -> str:
+        return (
+            "请根据以上信息生成 JSON：\n"
+            "- decision: open_long | open_short | hold\n"
+            "- entry_price, stop_loss, take_profit, risk_reward（浮点数）\n"
+            "- confidence: 0-100\n"
+            "- reason: 简洁的中文决策原因\n"
+            "- position_size: 若需要开仓请给出仓位大小（浮点数，未提供视为 0）\n"
+            "务必描述风险与行情结构。"
+        )
+
+    def _review_task_text(self) -> str:
+        return (
+            "请根据以上信息评估当前持仓，输出 JSON：\n"
+            "- action: close | adjust | hold\n"
+            "- new_stop_loss, new_take_profit, new_rr（可为 null）\n"
+            "- reason: 中文说明\n"
+            "- context_summary: 对本次复评的简洁总结\n"
+            "- confidence: 0-100\n"
+            "若建议调整，请说明止损/止盈逻辑；若建议平仓，说明风险来源。"
+        )
+
+    def _build_trade_prompt(
+        self,
+        symbol: str,
+        payload: Dict[str, Any],
+        context: Optional[List[Any]],
+        shared: Optional[List[Any]],
+    ) -> str:
+        market_bundle = {
+            "symbol": symbol,
+            "market_mode": payload.get("market_mode"),
+            "mode_confidence": payload.get("mode_confidence"),
+            "trend_score": payload.get("trend_score"),
+            "trend_grade": payload.get("trend_grade"),
+            "cycle_weights": payload.get("cycle_weights"),
+            "features": payload.get("features"),
+            "environment": payload.get("environment"),
+            "global_temperature": payload.get("global_temperature"),
+            "structure": payload.get("structure"),
+            "context": context or [],
+            "shared_memory": shared or [],
+        }
+        features_json = json.dumps(market_bundle, ensure_ascii=False, indent=2)
+        sequences_json = json.dumps(payload.get("recent_ohlc") or {}, ensure_ascii=False, indent=2)
+        sections = [
+            "=== Instruction ===",
+            self._instruction_block(),
+            "=== Market Features ===",
+            features_json,
+            "=== Multi-Timeframe Price Sequences ===",
+            sequences_json,
+            "=== End Sequences ===",
+            "=== Task ===",
+            self._trade_task_text(),
+        ]
+        return "\n".join(sections)
+
+    def _build_review_prompt(
+        self,
+        symbol: str,
+        payload: Dict[str, Any],
+        context: Optional[List[Any]],
+        shared: Optional[List[Any]],
+    ) -> str:
+        review_bundle = {
+            "symbol": symbol,
+            "position": payload.get("position"),
+            "market": payload.get("market"),
+            "environment": payload.get("environment"),
+            "global_temperature": payload.get("global_temperature"),
+            "context": context or [],
+            "shared_memory": shared or [],
+        }
+        features_json = json.dumps(review_bundle, ensure_ascii=False, indent=2)
+        sequences_json = json.dumps(payload.get("recent_ohlc") or {}, ensure_ascii=False, indent=2)
+        sections = [
+            "=== Instruction ===",
+            self._instruction_block(review=True),
+            "=== Market Features ===",
+            features_json,
+            "=== Multi-Timeframe Price Sequences ===",
+            sequences_json,
+            "=== End Sequences ===",
+            "=== Task ===",
+            self._review_task_text(),
+        ]
+        return "\n".join(sections)
 
     @staticmethod
     def _parse_json(content: str) -> Dict[str, Any]:
