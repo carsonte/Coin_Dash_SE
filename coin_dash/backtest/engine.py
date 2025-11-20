@@ -226,6 +226,7 @@ def _make_decision(cfg: AppConfig, client: Optional[DeepSeekClient], symbol: str
         "environment": feature_ctx.environment,
         "global_temperature": feature_ctx.global_temperature,
         "cycle_weights": feature_ctx.market_mode.cycle_weights,
+        "recent_ohlc": feature_ctx.recent_ohlc,
         "structure": {
             name: {
                 "support": lvl.support,

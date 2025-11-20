@@ -51,12 +51,15 @@ class DeepSeekClient:
                 "Reply strictly in JSON.\n"
                 "All explanations must be in Simplified Chinese.\n"
                 "You have full autonomy to decide entries, stop loss, take profit, risk-reward, and position size.\n\n"
-                "You will receive multi-timeframe OHLCV, indicators, trend slopes, environment labels, and global market temperature.\n\n"
+                "You will receive multi-timeframe OHLCV, indicators, trend slopes, environment labels, and global market temperature.\n"
+                "You will also receive raw OHLCV sequences for 30m (last 50 bars), 1h (last 40 bars), and 4h (last 30 bars) so you can visualize price structure.\n"
+                "Use these sequences to reason about consolidation width, breakout quality, momentum shifts, and stop placement.\n\n"
                 "You MUST explicitly use:\n"
                 "- trend_slope fields (ema20_slope, ema60_slope, macd_hist_slope, rsi_trend, atr_trend, bb_width_trend)\n"
                 "- environment (volatility, regime, noise_level, liquidity)\n"
                 "- global_temperature (risk level, correlation, temperature)\n"
-                "to evaluate trend strength, volatility regime, and risk conditions.\n\n"
+                "to evaluate trend strength, volatility regime, and risk conditions.\n"
+                "You MUST reference the raw OHLCV sequences when judging trend changes or fake breakouts.\n\n"
                 "You must explain in Chinese why you open/hold/close based on these fields.\n\n"
                 "Output JSON with:\n"
                 "decision, entry_price, stop_loss, take_profit, risk_reward, confidence, reason, position_size."
@@ -69,7 +72,8 @@ class DeepSeekClient:
                 "shared_memory": shared,
                 "environment": payload.get("environment"),
                 "global_temperature": payload.get("global_temperature"),
-                "user_guidance": "请结合 trend_slope、environment、global_temperature 来判断趋势强弱、风险、波动结构，并据此决定止损位置、止盈目标和仓位大小。",
+                "recent_ohlc": payload.get("recent_ohlc"),
+                "user_guidance": "请结合 trend_slope、environment、global_temperature 以及 recent_ohlc 多周期原始序列来判断趋势结构、突破有效性、震荡宽度与动能变化，再决定止损、止盈和仓位大小。",
                 "format": {
                     "decision": "open_long|open_short|hold",
                     "entry_price": "float",
@@ -138,6 +142,7 @@ class DeepSeekClient:
             "data": payload,
             "environment": payload.get("environment"),
             "global_temperature": payload.get("global_temperature"),
+            "recent_ohlc": payload.get("recent_ohlc"),
             "format": {
                 "action": "close|adjust|hold",
                 "new_stop_loss": "float|null",
@@ -155,7 +160,7 @@ class DeepSeekClient:
                 "You are DeepSeek risk reviewer.\n"
                 "Reply strictly in JSON.\n"
                 "Return all explanations in Simplified Chinese.\n"
-                "You MUST use trend slope changes, environment labels, and global market temperature to decide whether the existing position should adjust stop loss, take profit, or close."
+                "You MUST use trend slope changes, environment labels, global market temperature, and the raw multi-timeframe OHLCV sequences (30m/1h/4h) to decide whether the existing position should adjust stop loss, take profit, or close."
             ),
             user_payload=user_payload,
         )

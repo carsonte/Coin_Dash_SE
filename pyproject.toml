@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "coin-dash"
+name = "coin-dash-se"
 version = "0.1.0"
 description = "Coin Dash: Modular crypto trading framework with AI decision adapter"
 authors = ["Your Name <you@example.com>"]

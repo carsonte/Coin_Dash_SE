@@ -1,7 +1,8 @@
 ﻿from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Tuple
+import math
+from typing import Dict, List, Tuple
 
 import pandas as pd
 
@@ -20,6 +21,7 @@ class FeatureContext:
     environment: Dict[str, str]
     global_temperature: Dict[str, object]
     reason: str
+    recent_ohlc: Dict[str, List[Dict[str, float]]]
 
 
 def _metrics(df: pd.DataFrame, prefix: str) -> Dict[str, float]:
@@ -46,28 +48,34 @@ def _metrics(df: pd.DataFrame, prefix: str) -> Dict[str, float]:
 
 
 def compute_feature_context(frames: Dict[str, pd.DataFrame]) -> FeatureContext:
-        features: Dict[str, float] = {}
-        for name in ["30m", "1h", "4h", "1d"]:
-            df = frames.get(name)
-            if df is None or df.empty:
-                continue
-            features.update(_metrics(df, name))
-            features.update(_slope_metrics(df, name))
-        environment = _environment_label(features, frames)
-        trend = build_trend_profile(frames)
-        structure = compute_levels(frames)
-        market_mode = detect_market_mode(frames, trend)
-        global_temp = _global_temperature(features, trend, frames)
-        reason = f"mode={market_mode.name} trend={trend.grade} score={trend.score:.1f}"
-        return FeatureContext(
-            features=features,
-            trend=trend,
-            structure=structure,
-            market_mode=market_mode,
-            environment=environment,
-            global_temperature=global_temp,
-            reason=reason,
-        )
+    features: Dict[str, float] = {}
+    for name in ["30m", "1h", "4h", "1d"]:
+        df = frames.get(name)
+        if df is None or df.empty:
+            continue
+        features.update(_metrics(df, name))
+        features.update(_slope_metrics(df, name))
+    environment = _environment_label(features, frames)
+    trend = build_trend_profile(frames)
+    structure = compute_levels(frames)
+    market_mode = detect_market_mode(frames, trend)
+    global_temp = _global_temperature(features, trend, frames)
+    recent_ohlc = {
+        "30m": _recent_ohlc(frames.get("30m"), 50),
+        "1h": _recent_ohlc(frames.get("1h"), 40),
+        "4h": _recent_ohlc(frames.get("4h"), 30),
+    }
+    reason = f"mode={market_mode.name} trend={trend.grade} score={trend.score:.1f}"
+    return FeatureContext(
+        features=features,
+        trend=trend,
+        structure=structure,
+        market_mode=market_mode,
+        environment=environment,
+        global_temperature=global_temp,
+        reason=reason,
+        recent_ohlc=recent_ohlc,
+    )
 
 
 def _slope(series: pd.Series, window: int = 5) -> float:
@@ -108,6 +116,26 @@ def _slope_metrics(df: pd.DataFrame, prefix: str) -> Dict[str, float | str]:
     out[f"bb_width_trend_{prefix}"] = _trend_label(width, 5)
     out[f"close_trend_{prefix}"] = _trend_label(price, 5)
     return out
+
+
+def _recent_ohlc(df: pd.DataFrame | None, limit: int) -> List[Dict[str, float]]:
+    if df is None or df.empty or limit <= 0:
+        return []
+    subset = df.tail(limit)
+    records: List[Dict[str, float]] = []
+    for _, row in subset.iterrows():
+        volume = float(row["volume"])
+        log_volume = math.log10(max(volume, 1e-9))
+        records.append(
+            {
+                "open": round(float(row["open"]), 2),
+                "high": round(float(row["high"]), 2),
+                "low": round(float(row["low"]), 2),
+                "close": round(float(row["close"]), 2),
+                "volume": round(log_volume, 2),
+            }
+        )
+    return records
 
 
 def _quantile_label(value: float, low: float, high: float) -> str:

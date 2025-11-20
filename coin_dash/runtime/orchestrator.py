@@ -54,6 +54,7 @@ class LiveOrchestrator:
         self.db = db_services
         self.safe_mode_threshold = 0
         self.safe_mode = None
+        self.last_perf_push: Optional[datetime] = None
 
     def run_cycle(self, symbols: List[str]) -> None:
         for symbol in symbols:
@@ -169,6 +170,7 @@ class LiveOrchestrator:
             decision.risk_reward,
             trade_type,
             feature_ctx.market_mode.name,
+            qty=plan.qty,
         )
         now_ts = datetime.now(timezone.utc).isoformat()
         self.deepseek.record_open_pattern(
@@ -270,6 +272,7 @@ class LiveOrchestrator:
                         )
                     if exit_type == "stop_loss":
                         self._handle_safe_mode_stop(now)
+                    self._publish_performance()
 
     def _handle_reviews(self, symbol: str, feature_ctx, candle: pd.Series) -> None:
         atr_key = f"atr_{self.cfg.timeframes.filter_fast}"
@@ -305,6 +308,9 @@ class LiveOrchestrator:
                 "trend_grade": feature_ctx.trend.grade,
                 "price": price,
             },
+            "recent_ohlc": feature_ctx.recent_ohlc,
+            "environment": feature_ctx.environment,
+            "global_temperature": feature_ctx.global_temperature,
         }
         try:
             decision = self.deepseek.review_position(symbol, position.id, payload)
@@ -340,6 +346,7 @@ class LiveOrchestrator:
                 action="提前平仓",
             )
             send_review_close_card(self.webhook, review_payload)
+            self._publish_performance()
             self.deepseek.record_market_event(
                 {
                     "type": "self_critique",
@@ -443,15 +450,34 @@ class LiveOrchestrator:
         if activated:
             self._send_anomaly("安全模式触发：连续止损超限", "暂停开仓等待人工确认")
 
-    def _maybe_send_daily_summary(self) -> None:
-        now = datetime.now(timezone.utc)
-        if not self.state.should_send_daily_summary(now, self.cfg.performance.report_hour_utc8):
-            return
+    def _build_performance_snapshot(self) -> tuple[Dict[str, float], Dict, Dict, Dict]:
         stats = self.state.performance_stats()
         modes = self.state.grouped_stats("market_mode")
         trade_types = self.state.grouped_stats("trade_type")
         symbols = self.state.grouped_stats("symbol")
-        send_performance_card(self.webhook, stats, modes, trade_types, symbols)
+        return stats, modes, trade_types, symbols
+
+    def _publish_performance(self, force: bool = False) -> Dict[str, float]:
+        stats, modes, trade_types, symbols = self._build_performance_snapshot()
+        should_send = bool(self.webhook)
+        if should_send:
+            if not force:
+                if not self.cfg.performance.instant_push:
+                    should_send = False
+                elif self.last_perf_push and (
+                    datetime.now(timezone.utc) - self.last_perf_push
+                ) < timedelta(minutes=self.cfg.performance.instant_cooldown_minutes):
+                    should_send = False
+            if should_send:
+                send_performance_card(self.webhook, stats, modes, trade_types, symbols)
+                self.last_perf_push = datetime.now(timezone.utc)
+        return stats
+
+    def _maybe_send_daily_summary(self) -> None:
+        now = datetime.now(timezone.utc)
+        if not self.state.should_send_daily_summary(now, self.cfg.performance.report_hour_utc8):
+            return
+        stats = self._publish_performance(force=True)
         self._adjust_thresholds(stats)
 
     def _adjust_thresholds(self, stats: Dict[str, float]) -> None:

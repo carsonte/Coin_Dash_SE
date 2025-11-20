@@ -45,6 +45,7 @@ class PositionState:
     created_at: datetime
     updated_at: datetime
     last_review_at: datetime
+    qty: float = 0.0
     status: str = "open"
     closed_at: Optional[datetime] = None
 
@@ -71,6 +72,7 @@ class PositionState:
             created_at=_parse_dt(record.get("created_at")) or _utc_now(),
             updated_at=_parse_dt(record.get("updated_at")) or _utc_now(),
             last_review_at=_parse_dt(record.get("last_review_at")) or _utc_now(),
+            qty=record.get("qty", 0.0),
             status=record.get("status", "open"),
             closed_at=_parse_dt(record.get("closed_at")),
         )
@@ -149,6 +151,7 @@ class StateManager:
         rr: float,
         trade_type: str,
         market_mode: str,
+        qty: float = 0.0,
     ) -> PositionState:
         now = _utc_now()
         pos = PositionState(
@@ -164,6 +167,7 @@ class StateManager:
             created_at=now,
             updated_at=now,
             last_review_at=now,
+            qty=qty,
         )
         self._positions.setdefault(symbol, []).append(pos)
         self._dump()
@@ -205,6 +209,8 @@ class StateManager:
         exit_type: str,
         reason: str,
         duration: str,
+        realized_pnl: Optional[float] = None,
+        executed_qty: Optional[float] = None,
     ) -> Optional[ExitEventPayload]:
         pos = self._find_position(symbol, position_id)
         if not pos or pos.status == "closed":
@@ -213,7 +219,12 @@ class StateManager:
         pos.closed_at = _utc_now()
         pos.updated_at = pos.closed_at
 
-        pnl = (exit_price - pos.entry) if pos.side == "open_long" else (pos.entry - exit_price)
+        qty = executed_qty if executed_qty is not None else (pos.qty if pos.qty > 0 else 1.0)
+        if realized_pnl is not None:
+            pnl = realized_pnl
+        else:
+            price_diff = (exit_price - pos.entry) if pos.side == "open_long" else (pos.entry - exit_price)
+            pnl = price_diff * qty
         record = {
             "symbol": pos.symbol,
             "trade_type": pos.trade_type,
@@ -222,6 +233,7 @@ class StateManager:
             "pnl": pnl,
             "exit_type": exit_type,
             "closed_at": _serialize_dt(pos.closed_at),
+            "qty": qty,
         }
         self._closed.append(record)
         self._dump()

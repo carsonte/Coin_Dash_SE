@@ -109,6 +109,8 @@ class PerformanceCfg(BaseModel):
     report_hour_utc8: int = 23
     safe_mode: Dict[str, int] = Field(default_factory=dict)
     adaptive_thresholds: Dict[str, float] = Field(default_factory=dict)
+    instant_push: bool = True
+    instant_cooldown_minutes: int = 30
 
 
 class NotificationsCfg(BaseModel):

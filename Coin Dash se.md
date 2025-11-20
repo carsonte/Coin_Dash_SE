@@ -19,6 +19,12 @@
 5) **通知**：信号卡标注“🤖 AI完全自主决策版本”，展示 AI 仓位；退出/观望卡同步提示。
 6) **一键平仓**：命令 `python -m coin_dash.cli close-all [--symbols ...]` 将当前持仓标记为手动平仓，并推送提示卡。
 
+## 最新更新：多周期原始 K 线输入
+- `compute_feature_context` 新增 `recent_ohlc` 字段，截取 30m/50 根、1h/40 根、4h/30 根的原始 OHLCV（价格保留两位小数、成交量取 log10），让 DeepSeek 能“看到”真实走势；  
+- 回测、实时与复评全流程都会携带 `recent_ohlc`、环境标签和全局温度发送给 DeepSeek，AI 在开仓/观望/复评时都能据此判断趋势结构、突破有效性与止损位置；  
+- DeepSeek Prompt 及 `python -m coin_dash.cli deepseek-test` 示例 payload 已同步更新，明确要求参考多周期序列；  
+- 测试：`python -m pytest`（现有用例全部通过），验证新增字段不会影响既有逻辑。
+
 ## 运行方式
 - 回测：`python -m coin_dash.cli backtest --symbol BTCUSDT --csv data/sample/BTCUSDT_30m_2025-10_11.csv`
 - 实时单次：`python -m coin_dash.cli live --symbols BTCUSDT`

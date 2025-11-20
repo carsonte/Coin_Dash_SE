@@ -1005,6 +1005,20 @@ def cmd_deepseek_test(args: argparse.Namespace) -> None:
             '4h': {'support': 47400.0, 'resistance': 48800.0},
             '1d': {'support': 46800.0, 'resistance': 49200.0},
         },
+        'environment': {'volatility': 'normal', 'regime': 'trending_up', 'noise_level': 'normal', 'liquidity': 'normal'},
+        'global_temperature': {'market_risk': 'medium', 'temperature': 'warm'},
+        'recent_ohlc': {
+            '30m': [
+                {'open': 48100.0, 'high': 48250.0, 'low': 48000.0, 'close': 48200.0, 'volume': 3.2},
+                {'open': 48200.0, 'high': 48320.0, 'low': 48120.0, 'close': 48300.0, 'volume': 3.4},
+            ],
+            '1h': [
+                {'open': 47850.0, 'high': 48350.0, 'low': 47700.0, 'close': 48250.0, 'volume': 3.6},
+            ],
+            '4h': [
+                {'open': 47000.0, 'high': 48400.0, 'low': 46800.0, 'close': 48200.0, 'volume': 3.8},
+            ],
+        },
     }
 
     print('[cyan]调用 DeepSeek 决策接口...[/cyan]')
@@ -1021,7 +1035,7 @@ def cmd_deepseek_test(args: argparse.Namespace) -> None:
 
     if args.review:
         review_payload = {
-            'context_note': '测试复评',
+            'context_note': 'demo review',
             'position': {
                 'symbol': args.symbol,
                 'side': decision.decision,
@@ -1036,8 +1050,11 @@ def cmd_deepseek_test(args: argparse.Namespace) -> None:
                 'trend_grade': 'strong',
                 'price': decision.entry_price,
             },
+            'environment': decision_payload['environment'],
+            'global_temperature': decision_payload['global_temperature'],
+            'recent_ohlc': decision_payload['recent_ohlc'],
         }
-        print('[cyan]调用 DeepSeek 复评接口...[/cyan]')
+        print('[cyan]DeepSeek review API...[/cyan]')
         review = client.review_position(args.symbol, 'test-position', review_payload)
         print(f"[green]复评成功[/green]: action={review.action}, reason={review.reason}")
 
