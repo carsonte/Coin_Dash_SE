@@ -173,34 +173,40 @@ class DeepSeekClient:
         raise RuntimeError("DeepSeek request failed unexpectedly")
 
     def _instruction_header(self, review: bool = False) -> str:
-        role = (
-            "You are a professional-level crypto trading AI operating in SE mode."
-            if not review
-            else "You are DeepSeek risk reviewer operating in SE mode."
-        )
+        role = "决策" if not review else "复评"
         return (
-            f"{role}\n"
             "Reply strictly in JSON and keep all explanations in Simplified Chinese.\n"
-            "Stay disciplined, avoid hallucinations, and respect the provided multi-timeframe context.\n"
-            "Raw multi-timeframe OHLC sequences have highest priority; indicators are secondary summaries."
+            f"当前任务：{role}。\n"
+            "你是一位专业的多周期趋势交易分析师，与你对话的系统会提供完整的市场信息，包括技术指标、趋势评分、市场结构信息，以及多周期原始 OHLCV 序列。\n"
+            "=== 核心规则 ===\n"
+            "1. 原始多周期序列（30m/1h/4h）是最重要的信息源，具有最高优先级。\n"
+            "   - 用于判断趋势方向、结构位置、突破有效性、震荡宽度、动能变化、吸筹出货、假突破与失败形态。\n"
+            "   - 当指标与原始序列矛盾时，以原始序列为准。\n"
+            "2. 技术指标仅作为数学总结：\n"
+            "   - EMA20/60、RSI14、MACD、ATR、布林带宽、成交量等指标用于辅助理解，而不是决定方向。\n"
+            "   - 指标背离、动能变化、趋势一致性，仅作为参考。\n"
+            "3. 趋势评分/模式识别仅为提示性信息：\n"
+            "   - 你可以参考趋势评分（strong/medium/weak/chaotic）和 market_mode（trending/ranging/breakout/reversal）。\n"
+            "   - 但最终判断必须由你结合原始序列得出。\n"
+            "4. 决策的一般原则：\n"
+            "   - 避免在无序震荡的噪声中开仓。\n"
+            "   - 优先顺势，其次反转，但反转必须要有结构确认。\n"
+            "   - 若出现波动极低、巨幅无方向波动、序列结构损坏，应暂停开仓。\n"
+            "   - 关注波动收窄/扩张、突破前动能积累、三连试探失败、假突破后的快速收回、影线行为。\n"
+            "5. 止损逻辑：\n"
+            "   - 必须基于结构位，不得使用随意的固定距离。\n"
+            "   - 止损放在结构低点/高点外、之前的防守位之外，避免放在影线密集、容易被扫的位置。\n"
+            "6. RR 要求：\n"
+            "   - RR 不固定，但必须符合结构；若结构只支持 RR=1.0~1.5，也必须如实给出。\n"
+            "   - 不得凭空给不合理的远止盈。\n"
+            "7. 输出内容：\n"
+            "   - 开仓/观望/调整/退出；方向（long/short）；入场价、止损价、止盈价；RR、position_size；\n"
+            "   - 清晰逻辑：趋势结构 + 动能 + 风险点 + 预期行为。\n"
+            "请结合以上规则，对后续的特征信息与多周期序列信息进行整体推理，以专业交易员的角度给出决策。\n"
         )
 
     def _instruction_block(self, review: bool = False) -> str:
-        base = (
-            "你将获得多个周期的原始 K 线序列（未经过指标加工）：\n"
-            "- 30 分钟周期：最近 50 根 K 线\n"
-            "- 1 小时周期：最近 40 根 K 线\n"
-            "- 4 小时周期：最近 30 根 K 线\n\n"
-            "每根 K 线包含 open、high、low、close、volume（已做 log10 压缩）。请基于这些序列判断：\n"
-            "- 趋势方向（多/空/震荡）与结构（高低点形态、假突破、震荡宽度）\n"
-            "- 动能变化（加速或衰减）与量价关系（爆量/缩量、配合或背离）\n"
-            "- 支撑/压力是否有效、风险等级、合理的止损/止盈/RR\n"
-            "- 当前是否适合开仓、持仓或观望，并说明理由\n\n"
-            "原始序列具有最高优先级；技术指标（EMA、RSI、MACD、ATR、布林等）仅作总结性参考。当指标与原始序列矛盾时，以原始序列表现为准。"
-        )
-        if review:
-            return "复评任务说明：\n" + base
-        return base
+        return "以上为决策/复评的核心规则。"
 
     def _trade_task_text(self) -> str:
         return (
