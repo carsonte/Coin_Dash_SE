@@ -83,6 +83,24 @@ class PaperBroker:
                 t.exit_price = exit_price
                 t.record(f"close {reason} price={exit_price:.2f} pnl={pnl:.2f}")
 
+    def close(self, trade_id: str, price: float, ts: int, reason: str) -> Optional[Trade]:
+        """
+        Close a trade manually (e.g., when live logic triggers a close) and return the trade.
+        """
+        trade = next((t for t in self.trades if t.trade_id == trade_id), None)
+        if trade is None or trade.closed_at is not None:
+            return None
+        fee = price * trade.qty * self.fee_rate
+        pnl = (price - trade.entry) * trade.qty if trade.side == "open_long" else (trade.entry - price) * trade.qty
+        pnl -= fee
+        trade.pnl = pnl
+        self.equity += pnl
+        trade.closed_at = ts
+        trade.exit_reason = reason
+        trade.exit_price = price
+        trade.record(f"close {reason} price={price:.2f} pnl={pnl:.2f}")
+        return trade
+
     def summary(self) -> dict:
         closed = [t for t in self.trades if t.closed_at is not None]
         wins = [t for t in closed if t.pnl > 0]

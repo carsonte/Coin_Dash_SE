@@ -33,7 +33,8 @@ Coin Dash · AI 自主决策版
 - DeepSeek token 预算拦截/警告移除，调用量不再受限。  
 - 飞书信号卡片时间改为 UTC+8 展示，便于本地查看。  
 - RR 统一按入场/止盈/止损实算，保证卡片与执行一致。  
-- 新增多周期 `recent_ohlc` 输入并写入 DeepSeek Prompt 与 CLI 示例，帮助 AI 看到“盘面”。
+- 新增多周期 `recent_ohlc` 输入并写入 DeepSeek Prompt 与 CLI 示例，帮助 AI 看到“盘面”。  
+- DeepSeek Prompt 升级为“终极版本”：明确原始 30m/1h/4h 序列最高优先级，指标/趋势/模式仅作参考；强调结构止损、动能、假突破与 RR 合理性。
 
 关键改动
 --------
@@ -44,7 +45,7 @@ Coin Dash · AI 自主决策版
 
 测试
 ----
-- `python -m pytest`
+- 2025-11-21：`pytest --maxfail=1 --disable-warnings --co`（no tests collected）
 
 注意
 ----

@@ -2,13 +2,14 @@ from __future__ import annotations
 import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import pandas as pd
 
 from ..config import AppConfig
 from ..data.fetcher import LiveDataFetcher
 from ..data.pipeline import DataPipeline
+from ..exec.paper import PaperBroker
 from ..features.multi_timeframe import compute_feature_context
 from ..features.trend import classify_trade_type
 from ..notify.lark import (
@@ -55,6 +56,8 @@ class LiveOrchestrator:
         self.safe_mode_threshold = 0
         self.safe_mode = None
         self.last_perf_push: Optional[datetime] = None
+        self.paper_broker = PaperBroker(cfg.backtest.initial_equity, cfg.backtest.fee_rate)
+        self.paper_positions: Dict[str, str] = {}
 
     def run_cycle(self, symbols: List[str]) -> None:
         for symbol in symbols:
@@ -172,6 +175,19 @@ class LiveOrchestrator:
             feature_ctx.market_mode.name,
             qty=plan.qty,
         )
+        paper_trade = self.paper_broker.open(
+            symbol=symbol,
+            side=decision.decision,
+            entry=decision.entry_price,
+            stop=decision.stop_loss,
+            take=decision.take_profit,
+            qty=plan.qty,
+            ts=int(now.timestamp()),
+            trade_type=trade_type,
+            mode=feature_ctx.market_mode.name,
+            rr=decision.risk_reward,
+        )
+        self.paper_positions[position.id] = paper_trade.trade_id
         now_ts = datetime.now(timezone.utc).isoformat()
         self.deepseek.record_open_pattern(
             symbol,
@@ -237,6 +253,7 @@ class LiveOrchestrator:
                 payload = self.state.close_position(symbol, pos.id, triggered, exit_type, reason, duration)
                 if payload:
                     send_exit_card(self.webhook, payload)
+                    self._close_paper_trade(pos.id, triggered, exit_type, int(now.timestamp()))
                     now_ts = datetime.now(timezone.utc).isoformat()
                     self.deepseek.record_position_event(
                         pos.id,
@@ -322,6 +339,7 @@ class LiveOrchestrator:
         if decision.action == "close":
             duration = self._format_duration(datetime.now(timezone.utc) - position.created_at)
             self.state.close_position(symbol, position.id, price, "review_close", decision.reason, duration)
+            self._close_paper_trade(position.id, price, "review_close", int(datetime.now(timezone.utc).timestamp()))
             if self.db and self.db.trading:
                 self.db.trading.upsert_position(position, status="closed")
                 self.db.trading.record_manual_close(
@@ -382,6 +400,7 @@ class LiveOrchestrator:
                 return
             updated = self.state.update_position_levels(symbol, position.id, new_stop, new_take, new_rr)
             if updated:
+                self._adjust_paper_trade(position.id, new_stop, new_take, "review_adjust")
                 if self.db and self.db.trading:
                     self.db.trading.upsert_position(updated)
                 review_payload = ReviewAdjustPayload(
@@ -493,3 +512,15 @@ class LiveOrchestrator:
             parts.append(f"{hours}h")
         parts.append(f"{minutes}m")
         return " ".join(parts)
+
+    def _close_paper_trade(self, position_id: str, price: float, reason: str, ts: int) -> None:
+        trade_id = self.paper_positions.pop(position_id, None)
+        if not trade_id:
+            return
+        self.paper_broker.close(trade_id, price, ts, reason)
+
+    def _adjust_paper_trade(self, position_id: str, new_stop: float, new_take: float, note: str) -> None:
+        trade_id = self.paper_positions.get(position_id)
+        if not trade_id:
+            return
+        self.paper_broker.adjust(trade_id, new_stop=new_stop, new_take=new_take, note=note)

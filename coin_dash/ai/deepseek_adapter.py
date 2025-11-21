@@ -210,24 +210,24 @@ class DeepSeekClient:
 
     def _trade_task_text(self) -> str:
         return (
-            "璇锋牴鎹互涓婁俊鎭敓鎴?JSON锛歕n"
+            "请根据以上信息生成 JSON：\n"
             "- decision: open_long | open_short | hold\n"
-            "- entry_price, stop_loss, take_profit, risk_reward锛堟诞鐐规暟锛塡n"
+            "- entry_price, stop_loss, take_profit, risk_reward（浮点数）\n"
             "- confidence: 0-100\n"
-            "- reason: 绠€娲佺殑涓枃鍐崇瓥鍘熷洜\n"
-            "- position_size: 鑻ラ渶瑕佸紑浠撹缁欏嚭浠撲綅澶у皬锛堟诞鐐规暟锛屾湭鎻愪緵瑙嗕负 0锛塡n"
-            "鍔″繀鎻忚堪椋庨櫓涓庤鎯呯粨鏋勩€?
+            "- reason: 简洁的中文决策原因\n"
+            "- position_size: 若需要开仓请给出仓位大小（浮点数，未提供视为 0）\n"
+            "务必描述风险与行情结构，不要输出除 JSON 之外的内容。"
         )
 
     def _review_task_text(self) -> str:
         return (
-            "璇锋牴鎹互涓婁俊鎭瘎浼板綋鍓嶆寔浠擄紝杈撳嚭 JSON锛歕n"
+            "请根据以上信息评估当前持仓，输出 JSON：\n"
             "- action: close | adjust | hold\n"
-            "- new_stop_loss, new_take_profit, new_rr锛堝彲涓?null锛塡n"
-            "- reason: 涓枃璇存槑\n"
-            "- context_summary: 瀵规湰娆″璇勭殑绠€娲佹€荤粨\n"
+            "- new_stop_loss, new_take_profit, new_rr（可为 null）\n"
+            "- reason: 中文说明\n"
+            "- context_summary: 对本次复评的简洁总结\n"
             "- confidence: 0-100\n"
-            "鑻ュ缓璁皟鏁达紝璇疯鏄庢鎹?姝㈢泩閫昏緫锛涜嫢寤鸿骞充粨锛岃鏄庨闄╂潵婧愩€?
+            "若建议调整，请说明止损/止盈逻辑；若建议平仓，说明风险来源。"
         )
 
     def _build_trade_prompt(
@@ -302,7 +302,7 @@ class DeepSeekClient:
         try:
             return json.loads(content)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"鏃犳硶瑙ｆ瀽 DeepSeek 杩斿洖鍐呭涓?JSON锛歿content}") from exc
+            raise ValueError(f"无法解析 DeepSeek 返回内容为 JSON：{content}") from exc
 
     @staticmethod
     def _to_float(value: Any) -> Optional[float]:
