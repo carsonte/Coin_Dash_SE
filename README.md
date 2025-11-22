@@ -45,7 +45,7 @@ Coin Dash · AI 自主决策版
 
 测试
 ----
-- 2025-11-21：`pytest --maxfail=1 --disable-warnings --co`（no tests collected）
+- 2025-11-21：`pytest --maxfail=1 --disable-warnings`（4 passed）
 
 注意
 ----
