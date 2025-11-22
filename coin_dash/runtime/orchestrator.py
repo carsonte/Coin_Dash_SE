@@ -58,6 +58,7 @@ class LiveOrchestrator:
         self.last_perf_push: Optional[datetime] = None
         self.paper_broker = PaperBroker(cfg.backtest.initial_equity, cfg.backtest.fee_rate)
         self.paper_positions: Dict[str, str] = {}
+        self.last_open: Dict[str, datetime] = {}
 
     def run_cycle(self, symbols: List[str]) -> None:
         for symbol in symbols:
@@ -143,6 +144,12 @@ class LiveOrchestrator:
         if not validation.ok:
             return
         now = datetime.now(timezone.utc)
+        cooldown = timedelta(minutes=self.cfg.signals.cooldown_minutes or 0)
+        if cooldown and decision.decision in ("open_long", "open_short"):
+            key = f"{symbol}:{decision.decision}"
+            last = self.last_open.get(key)
+            if last and (now - last) < cooldown:
+                return
         plan = position_size(self.cfg.backtest.initial_equity, decision, trade_type, self.cfg.risk)
         if plan.qty <= 0:
             return
@@ -188,6 +195,8 @@ class LiveOrchestrator:
             rr=decision.risk_reward,
         )
         self.paper_positions[position.id] = paper_trade.trade_id
+        if decision.decision in ("open_long", "open_short"):
+            self.last_open[f"{symbol}:{decision.decision}"] = now
         now_ts = datetime.now(timezone.utc).isoformat()
         self.deepseek.record_open_pattern(
             symbol,

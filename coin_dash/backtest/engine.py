@@ -217,6 +217,7 @@ def _make_decision(cfg: AppConfig, client: Optional[DeepSeekClient], symbol: str
             meta={"adapter": "deepseek", "status": reason},
         )
 
+    hints = _risk_quality_hint(feature_ctx)
     payload = {
         "market_mode": feature_ctx.market_mode.name,
         "mode_confidence": feature_ctx.market_mode.confidence,
@@ -227,6 +228,8 @@ def _make_decision(cfg: AppConfig, client: Optional[DeepSeekClient], symbol: str
         "global_temperature": feature_ctx.global_temperature,
         "cycle_weights": feature_ctx.market_mode.cycle_weights,
         "recent_ohlc": feature_ctx.recent_ohlc,
+        "risk_score_hint": hints["risk"],
+        "quality_score_hint": hints["quality"],
         "structure": {
             name: {
                 "support": lvl.support,
@@ -242,3 +245,19 @@ def _make_decision(cfg: AppConfig, client: Optional[DeepSeekClient], symbol: str
         return decision
     except Exception:
         return _hold("deepseek_unavailable")
+
+
+def _risk_quality_hint(feature_ctx) -> Dict[str, float]:
+    risk = 0.0
+    quality = 0.0
+    for tf in ["30m", "1h", "4h"]:
+        if feature_ctx.features.get(f"breakout_confirmed_{tf}", 0):
+            quality += 15
+        if feature_ctx.features.get(f"momentum_decay_{tf}", 0):
+            quality += 10
+        if feature_ctx.features.get(f"range_midzone_{tf}", 0):
+            risk += 20
+    mode = getattr(feature_ctx.market_mode, "name", "")
+    if mode in ("chaotic", "ranging"):
+        risk += 20
+    return {"risk": min(risk, 100.0), "quality": min(quality, 100.0)}

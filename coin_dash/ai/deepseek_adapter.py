@@ -85,6 +85,8 @@ class DeepSeekClient:
             confidence=float(data.get("confidence", 0.0)),
             reason=str(data.get("reason", "")),
             position_size=self._to_float(data.get("position_size")) or 0.0,
+            risk_score=self._to_float(data.get("risk_score")) or 0.0,
+            quality_score=self._to_float(data.get("quality_score")) or 0.0,
             meta=data,
         )
         decision.recompute_rr()
@@ -193,13 +195,17 @@ class DeepSeekClient:
             "   - 优先顺势，其次反转，但反转必须要有结构确认。\n"
             "   - 若出现波动极低、巨幅无方向波动、序列结构损坏，应暂停开仓。\n"
             "   - 关注波动收窄/扩张、突破前动能积累、三连试探失败、假突破后的快速收回、影线行为。\n"
-            "5. 止损逻辑：\n"
+            "5. 追涨杀跌约束（硬规则，违背则默认 hold）：\n"
+            "   - 突破不得追第一根，必须有回踩确认或连续 2-3 根收盘确认（含 breakout_confirmed_* 等特征），否则观望。\n"
+            "   - 回撤/反手不得砍第一根，必须看到结构破位或动能衰减连续 2-3 根（如 momentum_decay_*），否则先持仓/复评。\n"
+            "   - 当 market_mode=chaotic/ranging 或 noise_level 高时，禁止追价，只允许区间边缘的结构入场（可参考 range_midzone_* 识别中轴忌入场）。\n"
+            "6. 止损逻辑：\n"
             "   - 必须基于结构位，不得使用随意的固定距离。\n"
             "   - 止损放在结构低点/高点外、之前的防守位之外，避免放在影线密集、容易被扫的位置。\n"
-            "6. RR 要求：\n"
+            "7. RR 要求：\n"
             "   - RR 不固定，但必须符合结构；若结构只支持 RR=1.0~1.5，也必须如实给出。\n"
             "   - 不得凭空给不合理的远止盈。\n"
-            "7. 输出内容：\n"
+            "8. 输出内容：\n"
             "   - 开仓/观望/调整/退出；方向（long/short）；入场价、止损价、止盈价；RR、position_size；\n"
             "   - 清晰逻辑：趋势结构 + 动能 + 风险点 + 预期行为。\n"
             "请结合以上规则，对后续的特征信息与多周期序列信息进行整体推理，以专业交易员的角度给出决策。\n"
@@ -216,7 +222,9 @@ class DeepSeekClient:
             "- confidence: 0-100\n"
             "- reason: 简洁的中文决策原因\n"
             "- position_size: 若需要开仓请给出仓位大小（浮点数，未提供视为 0）\n"
-            "务必描述风险与行情结构，不要输出除 JSON 之外的内容。"
+            "- risk_score: 0-100，追第一根/噪声区追价/结构不清则加分\n"
+            "- quality_score: 0-100，有二次确认/动能衰减过滤/区间边缘入场则加分\n"
+            "务必描述风险与行情结构，若追第一根突破/回撤或 quality_score < risk_score，请默认 hold。不要输出除 JSON 之外的内容。"
         )
 
     def _review_task_text(self) -> str:
@@ -247,6 +255,8 @@ class DeepSeekClient:
             "features": payload.get("features"),
             "environment": payload.get("environment"),
             "global_temperature": payload.get("global_temperature"),
+            "risk_score_hint": payload.get("risk_score_hint"),
+            "quality_score_hint": payload.get("quality_score_hint"),
             "structure": payload.get("structure"),
             "context": context or [],
             "shared_memory": shared or [],

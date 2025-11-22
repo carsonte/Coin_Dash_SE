@@ -55,6 +55,7 @@ def compute_feature_context(frames: Dict[str, pd.DataFrame]) -> FeatureContext:
             continue
         features.update(_metrics(df, name))
         features.update(_slope_metrics(df, name))
+        features.update(_confirmation_metrics(df, name))
     environment = _environment_label(features, frames)
     trend = build_trend_profile(frames)
     structure = compute_levels(frames)
@@ -115,6 +116,48 @@ def _slope_metrics(df: pd.DataFrame, prefix: str) -> Dict[str, float | str]:
     out[f"atr_trend_{prefix}"] = _trend_label(atr_vals, 5)
     out[f"bb_width_trend_{prefix}"] = _trend_label(width, 5)
     out[f"close_trend_{prefix}"] = _trend_label(price, 5)
+    return out
+
+
+def _confirmation_metrics(df: pd.DataFrame, prefix: str) -> Dict[str, float | int]:
+    """
+    Lightweight breakout / momentum / range center hints to discourage chasing.
+    - breakout_confirmed_*: 1 if价格收盘已连续>=2根站上最近阻力（向上）或跌破支撑（向下）
+    - momentum_decay_*: 1 if 连续2-3根实体缩短或高/低点收缩，提示动能衰减
+    - range_midzone_*: 1 if 当前收盘接近近期区间中轴，提示不要追价
+    These are prompt hints only, not hard filters.
+    """
+    out: Dict[str, float | int] = {}
+    if prefix == "1d":
+        return out
+    if len(df) < 5:
+        return out
+    closes = df["close"].tail(5)
+    highs = df["high"].tail(5)
+    lows = df["low"].tail(5)
+    recent_high = float(highs.max())
+    recent_low = float(lows.min())
+    last_close = float(closes.iloc[-1])
+
+    # Breakout confirmation: last 3 bars closes all above recent_high*0.999 or below recent_low*1.001
+    last3 = closes.tail(3)
+    up_confirm = all(c > recent_high * 0.999 for c in last3)
+    down_confirm = all(c < recent_low * 1.001 for c in last3)
+    out[f"breakout_confirmed_{prefix}"] = 1 if (up_confirm or down_confirm) else 0
+
+    # Momentum decay: bodies shrinking for 3 bars or range contracting
+    bodies = (df["close"] - df["open"]).abs().tail(4)
+    body_decay = bodies.iloc[-1] < bodies.iloc[-2] < bodies.iloc[-3] if len(bodies) >= 3 else False
+    range_recent = (highs - lows).tail(4)
+    range_decay = range_recent.iloc[-1] < range_recent.iloc[-2] < range_recent.iloc[-3] if len(range_recent) >= 3 else False
+    out[f"momentum_decay_{prefix}"] = 1 if (body_decay or range_decay) else 0
+
+    # Range mid-zone: price near mid of recent high/low
+    mid = (recent_high + recent_low) / 2
+    span = max(recent_high - recent_low, 1e-9)
+    dist_mid = abs(last_close - mid) / span
+    out[f"range_midzone_{prefix}"] = 1 if dist_mid < 0.2 else 0
+
     return out
 
 

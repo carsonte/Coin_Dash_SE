@@ -15,6 +15,8 @@ class Decision:
     reason: str
     position_size: float = 0.0
     meta: Dict[str, Any] = field(default_factory=dict)
+    risk_score: float = 0.0
+    quality_score: float = 0.0
 
     def recompute_rr(self) -> float:
         """
