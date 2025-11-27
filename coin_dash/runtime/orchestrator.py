@@ -121,9 +121,12 @@ class LiveOrchestrator:
                         "summary": "上一轮决策因价格/结构异常被 fallback 拒绝，需加强价格关系检查。",
                     }
                 )
+            reason = decision.reason or "AI 选择观望"
+            if getattr(decision, "meta", {}).get("adapter") == "prefilter":
+                reason = f"GLM 预过滤：{reason}（未调用 DeepSeek）"
             watch_payload = WatchPayload(
                 symbol=symbol,
-                reason=decision.reason or "AI 选择观望",
+                reason=reason,
                 market_note=feature_ctx.reason,
                 confidence=decision.confidence if getattr(decision, "confidence", None) is not None else None,
                 next_check=datetime.now(timezone.utc) + timedelta(minutes=self.cfg.signals.review_interval_minutes),

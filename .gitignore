@@ -3,5 +3,7 @@
 state/
 venv/
 pycache/
+__pycache__/
+*.pyc
 .pytest_cache/
 *.log

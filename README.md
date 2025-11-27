@@ -52,7 +52,7 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
 - **安全模式**：`performance.safe_mode` 可设置连续止损阈值（默认关闭）。  
 - **通知**：`notifications` 中配置飞书 webhook 和签名秘钥。  
 - **数据库**：`database` 可开启/关闭 SQLite 或其它 DSN。  
-- **预过滤**：命中强触发直接进入 DeepSeek；否则 GLM-4.5-Flash 返回 `should_call`。异常/解析失败时放行。
+- **预过滤**：命中强触发直接进入 DeepSeek；否则 GLM-4.5-Flash 返回 `should_call`。异常/解析失败时放行；若 GLM 判定市场安静未调用 DeepSeek，观望卡会标注“GLM 预过滤（未调用 DeepSeek）”。
 
 目录索引
 --------

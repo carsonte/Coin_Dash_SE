@@ -147,7 +147,24 @@ class PreFilterClient:
 
     @staticmethod
     def _parse_json(content: str) -> Dict[str, Any]:
+        raw = content.strip()
+        # Many providers wrap JSON in ```json fences; unwrap them before parsing.
+        if raw.startswith("```"):
+            lines = raw.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            raw = "\n".join(lines).strip()
         try:
-            return json.loads(content)
+            return json.loads(raw)
         except json.JSONDecodeError as exc:
+            # Last attempt: extract the largest {...} block.
+            start = raw.find("{")
+            end = raw.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                try:
+                    return json.loads(raw[start : end + 1])
+                except Exception:
+                    pass
             raise ValueError(f"prefilter JSON parse error: {content}") from exc

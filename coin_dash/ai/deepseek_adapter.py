@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 import requests
 
 from ..config import DeepSeekCfg
+from .filter_adapter import PreFilterClient
 from .context import ConversationManager
 from .models import Decision, ReviewDecision
 if TYPE_CHECKING:
@@ -27,6 +28,7 @@ class DeepSeekClient:
         self.api_key = os.getenv("DEEPSEEK_API_KEY")
         self.api_base = os.getenv("DEEPSEEK_API_BASE", cfg.api_base).rstrip("/")
         self.ai_logger = decision_logger
+        self.prefilter = PreFilterClient()
 
     def enabled(self) -> bool:
         return self.cfg.enabled and bool(self.api_key)
@@ -42,6 +44,21 @@ class DeepSeekClient:
         self.conversation.add_shared_event(event)
 
     def decide_trade(self, symbol: str, payload: Dict[str, Any]) -> Decision:
+        # Pre-filter: small/quiet market may skip DeepSeek to省调用；强触发已在 filter_adapter 兜底。
+        prefilter = self._prefilter_gate(payload)
+        if prefilter and not prefilter.get("should_call", True):
+            price = self._price_from_payload(payload)
+            reason = prefilter.get("reason", "prefilter_hold")
+            return Decision(
+                decision="hold",
+                entry_price=price,
+                stop_loss=price,
+                take_profit=price,
+                risk_reward=0.0,
+                confidence=0.0,
+                reason=reason,
+                meta={"adapter": "prefilter"},
+            )
         context = self.conversation.get_context(f"open:{symbol}", symbol)
         shared = self.conversation.get_shared_context()
         prompt_text = self._build_trade_prompt(symbol, payload, context, shared)
@@ -97,6 +114,10 @@ class DeepSeekClient:
         self.conversation.append(position_id, symbol, "user", note)
         context = self.conversation.get_context(position_id, symbol)
         shared = self.conversation.get_shared_context()
+        # 复评同样受预过滤保护，保持 hold 返回格式一致。
+        prefilter = self._prefilter_gate(payload, position_state=payload.get("position"), next_review_time=payload.get("next_review"))
+        if prefilter and not prefilter.get("should_call", True):
+            return ReviewDecision(action="hold", reason=prefilter.get("reason", "prefilter_hold"))
         review_prompt = self._build_review_prompt(symbol, payload, context, shared)
         content, tokens_used, latency_ms = self._chat_completion(
             model=self.cfg.review_model,
@@ -320,3 +341,34 @@ class DeepSeekClient:
             return float(value) if value is not None else None
         except (TypeError, ValueError):
             return None
+
+    def _prefilter_gate(
+        self,
+        payload: Dict[str, Any],
+        position_state: Optional[Dict[str, Any]] = None,
+        next_review_time: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            feature_context = {
+                "features": payload.get("features") or {},
+                "structure": payload.get("structure") or {},
+                "market_mode": payload.get("market_mode"),
+                "trend_grade": payload.get("trend_grade"),
+                "mode_confidence": payload.get("mode_confidence"),
+                "recent_ohlc": payload.get("recent_ohlc") or {},
+            }
+            return self.prefilter.should_call_deepseek(feature_context, position_state, next_review_time)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _price_from_payload(payload: Dict[str, Any]) -> float:
+        feats = payload.get("features") or {}
+        for key in ("price_30m", "price_1h", "price_4h"):
+            val = feats.get(key)
+            if val is not None:
+                try:
+                    return float(val)
+                except (TypeError, ValueError):
+                    continue
+        return 0.0
