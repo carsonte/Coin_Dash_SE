@@ -73,6 +73,10 @@ class DataCfg(BaseModel):
     mt5_api: DataMT5APICfg = Field(default_factory=DataMT5APICfg)
 
 
+class LiveCfg(BaseModel):
+    symbols: List[str] = Field(default_factory=lambda: ["BTCUSDm", "XAUUSDm"])
+
+
 class DeepSeekCfg(BaseModel):
     enabled: bool = False
     model: str = "deepseek-chat"
@@ -136,6 +140,7 @@ class AppConfig(BaseModel):
     timeframes: TimeframeCfg = Field(default_factory=TimeframeCfg)
     market_filter: MarketFilterCfg = Field(default_factory=MarketFilterCfg)
     data: DataCfg = Field(default_factory=DataCfg)
+    live: LiveCfg = Field(default_factory=LiveCfg)
     risk: RiskCfg = Field(default_factory=RiskCfg)
     signals: SignalsCfg = Field(default_factory=SignalsCfg)
     deepseek: DeepSeekCfg = Field(default_factory=DeepSeekCfg)
@@ -153,6 +158,7 @@ def load_config(path: Optional[Path] = None) -> AppConfig:
         data: Dict[str, Any] = yaml.safe_load(f) or {}
     # Ensure nested defaults exist
     data.setdefault("data", {})
+    data.setdefault("live", {})
     env_notifications = data.setdefault("notifications", {})
     env_webhook = os.getenv("LARK_WEBHOOK")
     if env_webhook:

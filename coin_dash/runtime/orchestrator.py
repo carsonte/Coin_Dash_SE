@@ -59,9 +59,14 @@ class LiveOrchestrator:
         self.paper_broker = PaperBroker(cfg.backtest.initial_equity, cfg.backtest.fee_rate)
         self.paper_positions: Dict[str, str] = {}
         self.last_open: Dict[str, datetime] = {}
+        self.last_quotes: Dict[str, Dict[str, float]] = {}
 
     def run_cycle(self, symbols: List[str]) -> None:
         for symbol in symbols:
+            quote, market_open = self._check_market_open(symbol)
+            if not market_open:
+                print(f"[info] {symbol} market closed / on break")
+                continue
             try:
                 df = self.fetcher.fetch_dataframe(symbol)
             except Exception as exc:
@@ -70,7 +75,7 @@ class LiveOrchestrator:
             if df.empty:
                 continue
             try:
-                self._process_symbol(symbol, df)
+                self._process_symbol(symbol, df, quote)
             except Exception as exc:
                 traceback.print_exc()
                 self._send_anomaly(f"执行异常：{exc}", impact=f"{symbol} 处理失败")
@@ -83,6 +88,10 @@ class LiveOrchestrator:
         - 不做：新信号生成/模式告警/绩效汇总等重任务，减少无效调用与成本。
         """
         for symbol in symbols:
+            quote, market_open = self._check_market_open(symbol)
+            if not market_open:
+                print(f"[info] {symbol} market closed / on break")
+                continue
             try:
                 df = self.fetcher.fetch_dataframe(symbol)
                 if df.empty:
@@ -96,7 +105,7 @@ class LiveOrchestrator:
                 traceback.print_exc()
                 self._send_anomaly(f"心跳执行异常：{exc}", impact=f"{symbol} 心跳失败")
 
-    def _process_symbol(self, symbol: str, df: pd.DataFrame) -> None:
+    def _process_symbol(self, symbol: str, df: pd.DataFrame, quote: Optional[Dict[str, float]] = None) -> None:
         multi = self.pipeline.from_dataframe(symbol, df)
         if self.db and self.db.kline_writer:
             self.db.kline_writer.record_frames(symbol, multi.frames)
@@ -153,11 +162,11 @@ class LiveOrchestrator:
             last = self.last_open.get(key)
             if last and (now - last) < cooldown:
                 return
-        quote = {}
-        try:
-            quote = self.fetcher.fetch_price(symbol)
-        except Exception:
-            quote = {}
+        if quote is None:
+            try:
+                quote = self.fetcher.fetch_price(symbol)
+            except Exception:
+                quote = {}
         entry_price = decision.entry_price
         if quote:
             if decision.decision == "open_long":
@@ -441,6 +450,31 @@ class LiveOrchestrator:
                     next_review=datetime.now(timezone.utc) + timedelta(minutes=self.cfg.signals.review_interval_minutes),
                 )
                 send_review_adjust_card(self.webhook, review_payload)
+
+    def _check_market_open(self, symbol: str) -> tuple[Dict[str, float], bool]:
+        """
+        Detect simple market break/closed periods to avoid wasting API/DeepSeek calls.
+        - BTCUSDm 视为 24h 开市。
+        - XAUUSDm 若 bid/ask 缺失或 tick 时间超过阈值（默认 120s）判定休盘。
+        """
+        upper = symbol.upper()
+        if not upper.startswith("XAU"):
+            return {}, True
+        quote: Dict[str, float] = {}
+        try:
+            quote = self.fetcher.fetch_price(symbol) or {}
+            self.last_quotes[symbol] = quote
+        except Exception:
+            return {}, False
+        bid = quote.get("bid")
+        ask = quote.get("ask")
+        ts = int(quote.get("time") or 0)
+        if bid is None or ask is None:
+            return quote, False
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        if ts and (now_ts - ts) > 120:
+            return quote, False
+        return quote, True
 
     def _handle_mode_alert(self, symbol: str, mode, environment=None) -> None:
         last_mode = self.state.last_mode(symbol)

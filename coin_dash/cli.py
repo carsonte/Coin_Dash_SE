@@ -319,7 +319,14 @@ def cmd_live(args: argparse.Namespace) -> None:
 
 
 
-    target = args.symbols.split(",") if args.symbols else cfg.symbols
+    live_symbols = []
+    if args.symbols:
+        live_symbols = args.symbols.split(",")
+    elif getattr(cfg, "live", None) and getattr(cfg.live, "symbols", None):
+        live_symbols = list(cfg.live.symbols)
+    else:
+        live_symbols = cfg.symbols
+    target = live_symbols
 
 
 

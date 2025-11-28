@@ -43,7 +43,8 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
    - 复制 `.env.example` 为 `.env`，至少设置 `DEEPSEEK_API_KEY`。  
    - 飞书通知：`LARK_WEBHOOK`、`LARK_SIGNING_SECRET`（可选）。  
    - 预过滤：`ZHIPUAI_API_KEY`（可选 `ZHIPUAI_API_BASE`），未配置时自动放行 DeepSeek。  
-   - 数据源：`config/config.yaml` 里 `data.provider` 可选 `mt5_api`（默认）或 `ccxt`；MT5 API 需设置 `data.mt5_api.base_url`，符号使用 MT5 合约名（如 `BTCUSDm`、`ETHUSDm`）。  
+   - 数据源：`config/config.yaml` 里 `data.provider` 可选 `mt5_api`（默认）或 `ccxt`；MT5 API 需设置 `data.mt5_api.base_url`，符号使用 MT5 合约名（如 `BTCUSDm`、`ETHUSDm`、`XAUUSDm`）。  
+   - Live 多品种：`config.live.symbols` 可定义 live 默认品种（示例：`BTCUSDm`,`XAUUSDm`）；CLI `--symbols` 会覆盖。  
    - 其它参数见 `config/config.yaml`（时间框架、数据源、DeepSeek、数据库、日志、安全模式等）。
 3. 命令示例  
    - 回测：`python -m coin_dash.cli backtest --symbol BTCUSDm --csv data/sample/BTCUSDT_30m_2025-10_11.csv --deepseek`  
