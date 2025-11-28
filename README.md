@@ -8,7 +8,7 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
 近期更新
 --------
 - **MT5 实时行情**：新增 `mt5_api` 数据源（默认启用），从 Exness-MT5 API 拉取 `/ohlc`、`/price`；tick_volume → volume，秒级时间戳升序。`data.provider` 可切换回 `ccxt`。
-- **符号切换**：默认符号改为 MT5 合约 `BTCUSDm`、`ETHUSDm`，live/backtest 示例命令同步更新。
+- **符号切换**：默认符号改为 MT5 合约 `BTCUSDm`、`ETHUSDm`，并新增黄金 `XAUUSDm`（可在 `config.live.symbols` 直接跑多品种），live/backtest 示例命令同步更新。
 - **成交价来源**：PaperBroker 开仓价使用最新 bid/ask（多头用 ask，空头用 bid），确保模拟成交贴合盘口。
 - **预过滤增强**：GLM-4.5 预过滤支持 ```json 包裹/嵌套解析，观望卡会标注“GLM 预过滤（未调用 DeepSeek）”以区分静态观望与模型 hold。
 
@@ -44,7 +44,7 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
    - 飞书通知：`LARK_WEBHOOK`、`LARK_SIGNING_SECRET`（可选）。  
    - 预过滤：`ZHIPUAI_API_KEY`（可选 `ZHIPUAI_API_BASE`），未配置时自动放行 DeepSeek。  
    - 数据源：`config/config.yaml` 里 `data.provider` 可选 `mt5_api`（默认）或 `ccxt`；MT5 API 需设置 `data.mt5_api.base_url`，符号使用 MT5 合约名（如 `BTCUSDm`、`ETHUSDm`、`XAUUSDm`）。  
-   - Live 多品种：`config.live.symbols` 可定义 live 默认品种（示例：`BTCUSDm`,`XAUUSDm`）；CLI `--symbols` 会覆盖。  
+   - Live 多品种：`config.live.symbols` 可定义 live 默认品种（示例：`BTCUSDm`,`ETHUSDm`,`XAUUSDm`）；CLI `--symbols` 会覆盖。  
    - 其它参数见 `config/config.yaml`（时间框架、数据源、DeepSeek、数据库、日志、安全模式等）。
 3. 命令示例  
    - 回测：`python -m coin_dash.cli backtest --symbol BTCUSDm --csv data/sample/BTCUSDT_30m_2025-10_11.csv --deepseek`  

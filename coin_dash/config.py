@@ -136,7 +136,7 @@ class LogCfg(BaseModel):
 
 
 class AppConfig(BaseModel):
-    symbols: List[str] = Field(default_factory=lambda: ["BTCUSDm"])
+    symbols: List[str] = Field(default_factory=lambda: ["BTCUSDm", "ETHUSDm", "XAUUSDm"])
     timeframes: TimeframeCfg = Field(default_factory=TimeframeCfg)
     market_filter: MarketFilterCfg = Field(default_factory=MarketFilterCfg)
     data: DataCfg = Field(default_factory=DataCfg)

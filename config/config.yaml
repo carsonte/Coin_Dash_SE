@@ -3,11 +3,13 @@
 # 交易品种列表
 symbols:
   - BTCUSDm
+  - ETHUSDm
   - XAUUSDm
 
 live:
   symbols:
     - BTCUSDm
+    - ETHUSDm
     - XAUUSDm
 
 timeframes:
