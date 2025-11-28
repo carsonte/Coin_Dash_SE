@@ -2,8 +2,8 @@
 
 # 交易品种列表
 symbols:
-  - BTCUSDT
-  - ETHUSDT
+  - BTCUSDm
+  - ETHUSDm
 
 timeframes:
   lookback_bars: 320          # 各周期最多保留的K线数量

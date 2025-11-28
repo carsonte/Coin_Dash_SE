@@ -45,6 +45,24 @@ class MT5APIFetcher:
             return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
         if not data:
             return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+        # Accept both list-of-dict and list-of-list (MetaTrader rates array)
+        sample = data[0] if isinstance(data, list) and data else {}
+        if isinstance(sample, (list, tuple)) and len(sample) >= 6:
+            mapped = []
+            for row in data:
+                if not isinstance(row, (list, tuple)) or len(row) < 6:
+                    continue
+                mapped.append(
+                    {
+                        "time": row[0],
+                        "open": row[1],
+                        "high": row[2],
+                        "low": row[3],
+                        "close": row[4],
+                        "tick_volume": row[5],
+                    }
+                )
+            data = mapped
         df = pd.DataFrame(data)
         if df.empty or "time" not in df:
             return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
