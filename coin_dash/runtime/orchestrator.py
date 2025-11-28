@@ -472,7 +472,7 @@ class LiveOrchestrator:
         if bid is None or ask is None:
             return quote, False
         now_ts = int(datetime.now(timezone.utc).timestamp())
-        if ts and (now_ts - ts) > 120:
+        if ts and (now_ts - ts) > 180:
             return quote, False
         return quote, True
 
