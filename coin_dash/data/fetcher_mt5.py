@@ -66,10 +66,11 @@ class MT5APIFetcher:
         df = pd.DataFrame(data)
         if df.empty or "time" not in df:
             return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
-        # Rename tick_volume -> volume and coerce numeric types
-        if "tick_volume" in df.columns:
+        # Rename tick_volume -> volume and coerce numeric types (avoid duplicate columns)
+        if "tick_volume" in df.columns and "volume" not in df.columns:
             df["volume"] = df["tick_volume"]
-        df = df.rename(columns={"tick_volume": "volume"})
+        if "tick_volume" in df.columns:
+            df = df.drop(columns=["tick_volume"])
         for col in ["open", "high", "low", "close", "volume"]:
             if col in df:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
