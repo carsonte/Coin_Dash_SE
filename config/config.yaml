@@ -32,6 +32,11 @@ timeframes:
       atr_spike: 2.8
       volume_jump: 2.3
 
+data:
+  provider: mt5_api
+  mt5_api:
+    base_url: "http://61.164.242.190:23845"
+
 market_filter:
   # 活跃度阈值（AI版已不再限制，仅保留字段）
   score_thresholds:

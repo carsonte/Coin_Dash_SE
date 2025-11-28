@@ -153,6 +153,17 @@ class LiveOrchestrator:
             last = self.last_open.get(key)
             if last and (now - last) < cooldown:
                 return
+        quote = {}
+        try:
+            quote = self.fetcher.fetch_price(symbol)
+        except Exception:
+            quote = {}
+        entry_price = decision.entry_price
+        if quote:
+            if decision.decision == "open_long":
+                entry_price = float(quote.get("ask") or entry_price)
+            else:
+                entry_price = float(quote.get("bid") or entry_price)
         plan = position_size(self.cfg.backtest.initial_equity, decision, trade_type, self.cfg.risk)
         if plan.qty <= 0:
             return
@@ -177,7 +188,7 @@ class LiveOrchestrator:
         position = self.state.add_position(
             symbol,
             decision.decision,
-            decision.entry_price,
+            entry_price,
             decision.stop_loss,
             decision.take_profit,
             decision.risk_reward,
@@ -188,7 +199,7 @@ class LiveOrchestrator:
         paper_trade = self.paper_broker.open(
             symbol=symbol,
             side=decision.decision,
-            entry=decision.entry_price,
+            entry=entry_price,
             stop=decision.stop_loss,
             take=decision.take_profit,
             qty=plan.qty,

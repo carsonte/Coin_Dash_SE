@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Dict
 
 import pandas as pd
 
@@ -52,14 +52,50 @@ class LiveDataFetcher:
     cfg: AppConfig
 
     def __post_init__(self) -> None:
+        data_cfg = getattr(self.cfg, "data", None)
+        self.provider = getattr(data_cfg, "provider", "ccxt") if data_cfg else "ccxt"
         exchange_id = self.cfg.exchange.name
         if self.cfg.exchange.type == "futures" and exchange_id == "binance":
             exchange_id = "binanceusdm"
-        self.client = CCXTOHLCVClient(exchange=exchange_id, rate_limit=self.cfg.exchange.rate_limit)
+        if self.provider == "mt5_api":
+            from .fetcher_mt5 import MT5APIFetcher
+
+            base_url = ""
+            if data_cfg and getattr(data_cfg, "mt5_api", None):
+                base_url = getattr(data_cfg.mt5_api, "base_url", "") or ""
+            self.client = MT5APIFetcher(base_url=base_url)
+        else:
+            self.client = CCXTOHLCVClient(exchange=exchange_id, rate_limit=self.cfg.exchange.rate_limit)
         self.base_minutes = min(tf.minutes for tf in self.cfg.timeframes.defs.values())
         self.base_label = minutes_to_label(self.base_minutes)
+        if self.provider == "mt5_api":
+            from .fetcher_mt5 import SUPPORTED_MT5_TIMEFRAMES
+
+            if self.base_label not in SUPPORTED_MT5_TIMEFRAMES:
+                raise ValueError(f"MT5 provider does not support timeframe {self.base_label}")
 
     def fetch_dataframe(self, symbol: str) -> pd.DataFrame:
         limit = self.cfg.timeframes.lookback_bars + 50
+        if self.provider == "mt5_api":
+            return self.client.fetch_ohlc(symbol, timeframe=self.base_label, limit=limit)
         rows = self.client.fetch_ohlcv(symbol, timeframe=self.base_label, limit=limit)
         return ohlcv_to_dataframe(rows)
+
+    def fetch_price(self, symbol: str) -> Dict[str, float]:
+        # MT5 adapter exposes fetch_price; CCXT fallback uses ticker.
+        if hasattr(self.client, "fetch_price"):
+            try:
+                return self.client.fetch_price(symbol)
+            except Exception:
+                return {}
+        try:
+            ticker = self.client._ex.fetch_ticker(symbol)
+            return {
+                "symbol": symbol,
+                "bid": float(ticker.get("bid") or 0.0),
+                "ask": float(ticker.get("ask") or 0.0),
+                "last": float(ticker.get("last") or ticker.get("close") or 0.0),
+                "time": int(ticker.get("timestamp") / 1000) if ticker.get("timestamp") else 0,
+            }
+        except Exception:
+            return {}

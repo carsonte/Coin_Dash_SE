@@ -64,6 +64,15 @@ class DeepSeekRetryCfg(BaseModel):
     backoff_seconds: float = 1.5
 
 
+class DataMT5APICfg(BaseModel):
+    base_url: str = "http://localhost:8000"
+
+
+class DataCfg(BaseModel):
+    provider: str = "ccxt"  # ccxt | mt5_api
+    mt5_api: DataMT5APICfg = Field(default_factory=DataMT5APICfg)
+
+
 class DeepSeekCfg(BaseModel):
     enabled: bool = False
     model: str = "deepseek-chat"
@@ -126,6 +135,7 @@ class AppConfig(BaseModel):
     symbols: List[str] = Field(default_factory=lambda: ["BTCUSDT"])
     timeframes: TimeframeCfg = Field(default_factory=TimeframeCfg)
     market_filter: MarketFilterCfg = Field(default_factory=MarketFilterCfg)
+    data: DataCfg = Field(default_factory=DataCfg)
     risk: RiskCfg = Field(default_factory=RiskCfg)
     signals: SignalsCfg = Field(default_factory=SignalsCfg)
     deepseek: DeepSeekCfg = Field(default_factory=DeepSeekCfg)
@@ -141,6 +151,8 @@ def load_config(path: Optional[Path] = None) -> AppConfig:
     cfg_path = path or ROOT / "config" / "config.yaml"
     with open(cfg_path, "r", encoding="utf-8") as f:
         data: Dict[str, Any] = yaml.safe_load(f) or {}
+    # Ensure nested defaults exist
+    data.setdefault("data", {})
     env_notifications = data.setdefault("notifications", {})
     env_webhook = os.getenv("LARK_WEBHOOK")
     if env_webhook:
