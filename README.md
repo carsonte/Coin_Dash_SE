@@ -5,6 +5,13 @@ Coin Dash · AI 自主决策 SE
 ----
 Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则，由 DeepSeek（或 Mock）直接给出开仓/止盈/止损/RR/仓位。系统负责数据清洗、校验、记忆记录、纸盘同步与通知推送，并在 Prompt 中附带“反追涨杀跌”护栏（突破/反转二次确认，噪声区间禁止追价）。
 
+近期更新
+--------
+- **MT5 实时行情**：新增 `mt5_api` 数据源（默认启用），从 Exness-MT5 API 拉取 `/ohlc`、`/price`；tick_volume → volume，秒级时间戳升序。`data.provider` 可切换回 `ccxt`。
+- **符号切换**：默认符号改为 MT5 合约 `BTCUSDm`、`ETHUSDm`，live/backtest 示例命令同步更新。
+- **成交价来源**：PaperBroker 开仓价使用最新 bid/ask（多头用 ask，空头用 bid），确保模拟成交贴合盘口。
+- **预过滤增强**：GLM-4.5 预过滤支持 ```json 包裹/嵌套解析，观望卡会标注“GLM 预过滤（未调用 DeepSeek）”以区分静态观望与模型 hold。
+
 核心特性
 --------
 - **AI 全权决策**：关闭活跃度/静默/顺逆势等限制，AI 输出即执行，`position_size` 直用。
