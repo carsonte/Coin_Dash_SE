@@ -36,13 +36,14 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
    - 复制 `.env.example` 为 `.env`，至少设置 `DEEPSEEK_API_KEY`。  
    - 飞书通知：`LARK_WEBHOOK`、`LARK_SIGNING_SECRET`（可选）。  
    - 预过滤：`ZHIPUAI_API_KEY`（可选 `ZHIPUAI_API_BASE`），未配置时自动放行 DeepSeek。  
+   - 数据源：`config/config.yaml` 里 `data.provider` 可选 `mt5_api`（默认）或 `ccxt`；MT5 API 需设置 `data.mt5_api.base_url`，符号使用 MT5 合约名（如 `BTCUSDm`、`ETHUSDm`）。  
    - 其它参数见 `config/config.yaml`（时间框架、数据源、DeepSeek、数据库、日志、安全模式等）。
 3. 命令示例  
-   - 回测：`python -m coin_dash.cli backtest --symbol BTCUSDT --csv data/sample/BTCUSDT_30m_2025-10_11.csv --deepseek`  
-   - 实时单次：`python -m coin_dash.cli live --symbols BTCUSDT`  
-   - 循环实时：`python -m coin_dash.cli live --symbols BTCUSDT,ETHUSDT --loop`  
-   - 飞书卡片自检：`python -m coin_dash.cli cards-test --symbol BTCUSDT`  
-   - 一键平仓：`python -m coin_dash.cli close-all --symbols BTCUSDT,ETHUSDT`
+   - 回测：`python -m coin_dash.cli backtest --symbol BTCUSDm --csv data/sample/BTCUSDT_30m_2025-10_11.csv --deepseek`  
+   - 实时单次：`python -m coin_dash.cli live --symbols BTCUSDm`  
+   - 循环实时：`python -m coin_dash.cli live --symbols BTCUSDm,ETHUSDm --loop`  
+   - 飞书卡片自检：`python -m coin_dash.cli cards-test --symbol BTCUSDm`  
+   - 一键平仓：`python -m coin_dash.cli close-all --symbols BTCUSDm,ETHUSDm`
 
 配置要点
 --------
@@ -52,7 +53,8 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
 - **安全模式**：`performance.safe_mode` 可设置连续止损阈值（默认关闭）。  
 - **通知**：`notifications` 中配置飞书 webhook 和签名秘钥。  
 - **数据库**：`database` 可开启/关闭 SQLite 或其它 DSN。  
-- **预过滤**：命中强触发直接进入 DeepSeek；否则 GLM-4.5-Flash 返回 `should_call`。异常/解析失败时放行；若 GLM 判定市场安静未调用 DeepSeek，观望卡会标注“GLM 预过滤（未调用 DeepSeek）”。
+- **预过滤**：命中强触发直接进入 DeepSeek；否则 GLM-4.5-Flash 返回 `should_call`。异常/解析失败时放行；若 GLM 判定市场安静未调用 DeepSeek，观望卡会标注“GLM 预过滤（未调用 DeepSeek）”。  
+- **MT5 实时数据源**：`data.provider=mt5_api` 时，行情来自 MT5 API（`/price`、`/ohlc`），tick_volume → volume；K 线按秒级时间戳升序写入 pipeline/特征；PaperBroker 开仓价取最新 bid/ask（多头用 ask，空头用 bid），不再依赖 CCXT。
 
 目录索引
 --------
