@@ -51,8 +51,8 @@ class PreFilterClient:
             should_call = bool(data.get("should_call", True))
             reason = str(data.get("reason", "glm_decision"))
             return {"should_call": should_call, "reason": reason}
-        except Exception:
-            return {"should_call": True, "reason": "prefilter_fallback"}
+        except Exception as exc:
+            return {"should_call": True, "reason": f"prefilter_fallback:{exc}"}
 
     @staticmethod
     def _current_price(features: Dict[str, Any]) -> float:
