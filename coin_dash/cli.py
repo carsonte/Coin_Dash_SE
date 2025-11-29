@@ -11,6 +11,7 @@ import argparse
 
 
 import os
+import socket
 
 
 
@@ -178,12 +179,16 @@ load_dotenv(ROOT / ".env", override=False)
 
 
 
+def _generate_run_id() -> str:
+    host = socket.gethostname()
+    return f"{host}-{int(time.time())}"
 
-def _build_db_services(cfg):
+
+def _build_db_services(cfg, run_id: str | None = None):
 
 
 
-    return build_database_services(cfg.database)
+    return build_database_services(cfg.database, run_id=run_id)
 
 
 
@@ -209,7 +214,9 @@ def cmd_backtest(args: argparse.Namespace) -> None:
 
     _apply_notification_config(cfg)
 
-    services = _build_db_services(cfg)
+    run_id = args.run_id or _generate_run_id()
+
+    services = _build_db_services(cfg, run_id=run_id)
 
 
 
@@ -315,7 +322,9 @@ def cmd_live(args: argparse.Namespace) -> None:
 
     _apply_notification_config(cfg)
 
-    services = _build_db_services(cfg)
+    run_id = args.run_id or _generate_run_id()
+
+    services = _build_db_services(cfg, run_id=run_id)
 
 
 
@@ -330,7 +339,7 @@ def cmd_live(args: argparse.Namespace) -> None:
 
 
 
-    orchestrator = LiveOrchestrator(cfg, db_services=services)
+    orchestrator = LiveOrchestrator(cfg, db_services=services, run_id=run_id)
 
 
 
@@ -1430,6 +1439,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 
+    p_backtest.add_argument("--run-id", default=None, help="可选，指定本次回测的 run_id（默认自动生成）")
+
     p_backtest.set_defaults(func=cmd_backtest)
 
 
@@ -1443,6 +1454,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_live.add_argument("--config", type=Path, default=None)
     p_live.add_argument("--loop", action="store_true", help="循环运行")
     p_live.add_argument("--interval", type=int, default=300, help="循环模式下间隔秒数")
+    p_live.add_argument("--run-id", default=None, help="可选，指定本次 live 的 run_id（默认自动生成）")
     p_live.set_defaults(func=cmd_live)
 
 

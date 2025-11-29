@@ -2,17 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import (
-    JSON,
-    Date,
-    DateTime,
-    Float,
-    Integer,
-    String,
-    Text,
-    UniqueConstraint,
-    func,
-)
+from sqlalchemy import JSON, Date, DateTime, Float, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -41,9 +31,14 @@ class KlineData(Base):
 
 class SignalEntry(Base):
     __tablename__ = "signals"
-    __table_args__ = (UniqueConstraint("signal_id", name="uq_signal_id"),)
+    __table_args__ = (
+        UniqueConstraint("signal_id", name="uq_signal_id"),
+        Index("idx_signals_symbol_created_at", "symbol", "created_at"),
+        Index("idx_signals_run_id_created_at", "run_id", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     signal_id: Mapped[str] = mapped_column(String(64), index=True)
     symbol: Mapped[str] = mapped_column(String(20))
     direction: Mapped[str] = mapped_column(String(16))
@@ -63,9 +58,14 @@ class SignalEntry(Base):
 
 class TradeRecord(Base):
     __tablename__ = "trades"
-    __table_args__ = (UniqueConstraint("trade_id", name="uq_trade_id"),)
+    __table_args__ = (
+        UniqueConstraint("trade_id", name="uq_trade_id"),
+        Index("idx_trades_symbol_opened_at", "symbol", "opened_at"),
+        Index("idx_trades_run_id_opened_at", "run_id", "opened_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     trade_id: Mapped[str] = mapped_column(String(64), index=True)
     signal_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     symbol: Mapped[str] = mapped_column(String(20))
@@ -104,8 +104,13 @@ class PositionRecord(Base):
 
 class AIDecisionLog(Base):
     __tablename__ = "ai_decisions"
+    __table_args__ = (
+        Index("idx_ai_decisions_symbol_created_at", "symbol", "created_at"),
+        Index("idx_ai_decisions_run_id_created_at", "run_id", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     decision_type: Mapped[str] = mapped_column(String(20))
     symbol: Mapped[str] = mapped_column(String(20))
     payload: Mapped[dict] = mapped_column(JSON)
@@ -170,8 +175,10 @@ class TradeTypePerformance(Base):
 
 class SystemEvent(Base):
     __tablename__ = "system_events"
+    __table_args__ = (Index("idx_system_events_run_id_created_at", "run_id", "created_at"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     event_type: Mapped[str] = mapped_column(String(50))
     severity: Mapped[str] = mapped_column(String(10))
     description: Mapped[str] = mapped_column(Text)

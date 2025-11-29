@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Optional
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.engine.url import make_url, URL
 from sqlalchemy.orm import Session, scoped_session, sessionmaker
@@ -38,6 +38,7 @@ class DatabaseClient:
         self._session_factory = scoped_session(factory)
         if self.cfg.auto_migrate:
             Base.metadata.create_all(self.engine)
+            self._ensure_run_id_columns()
             logger.info("Database schema ensured via auto_migrate.")
 
     @contextmanager
@@ -58,6 +59,32 @@ class DatabaseClient:
     def dispose(self) -> None:
         if self.engine is not None:
             self.engine.dispose()
+
+    def _ensure_run_id_columns(self) -> None:
+        """Minimal, idempotent column patch for run_id on key tables."""
+        if self.engine is None:
+            return
+        inspector = inspect(self.engine)
+        targets = {
+            "ai_decisions": "run_id",
+            "signals": "run_id",
+            "trades": "run_id",
+            "system_events": "run_id",
+        }
+        with self.engine.connect() as conn:
+            for table, col_name in targets.items():
+                try:
+                    cols = [col["name"] for col in inspector.get_columns(table)]
+                except Exception:
+                    continue
+                if col_name in cols:
+                    continue
+                try:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col_name} VARCHAR(64)"))
+                    conn.commit()
+                    logger.info("Added column %s to table %s", col_name, table)
+                except Exception as exc:
+                    logger.warning("Failed to add column %s to %s: %s", col_name, table, exc)
 
     def _prepare_sqlite_url(self, url: URL) -> URL:
         db_path = url.database or ""

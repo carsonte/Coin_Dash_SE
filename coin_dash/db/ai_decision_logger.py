@@ -10,8 +10,9 @@ from .utils import utc_now
 
 
 class AIDecisionLogger:
-    def __init__(self, client: DatabaseClient) -> None:
+    def __init__(self, client: DatabaseClient, run_id: str | None = None) -> None:
         self.client = client
+        self.run_id = run_id
 
     def log_decision(
         self,
@@ -26,6 +27,7 @@ class AIDecisionLogger:
             return
         stmt = insert(AIDecisionLog).values(
             {
+                "run_id": self.run_id,
                 "decision_type": decision_type,
                 "symbol": symbol,
                 "payload": payload,
@@ -44,7 +46,12 @@ class AIDecisionLogger:
         if not self.client.enabled:
             return
         stmt = insert(ConversationLog).values(
-            {"context_key": context_key, "messages": messages, "tokens_accumulated": tokens, "updated_at": utc_now()}
+            {
+                "context_key": context_key,
+                "messages": messages,
+                "tokens_accumulated": tokens,
+                "updated_at": utc_now(),
+            }
         )
         stmt = stmt.on_conflict_do_update(
             index_elements=["context_key"],

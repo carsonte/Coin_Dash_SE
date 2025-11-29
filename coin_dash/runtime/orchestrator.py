@@ -43,7 +43,9 @@ STATE_PATH = Path(__file__).resolve().parents[1] / "state" / "state.json"
 
 
 class LiveOrchestrator:
-    def __init__(self, cfg: AppConfig, webhook: Optional[str] = None, db_services: Optional[DatabaseServices] = None) -> None:
+    def __init__(
+        self, cfg: AppConfig, webhook: Optional[str] = None, db_services: Optional[DatabaseServices] = None, run_id: Optional[str] = None
+    ) -> None:
         self.cfg = cfg
         self.fetcher = LiveDataFetcher(cfg)
         self.pipeline = DataPipeline(cfg)
@@ -53,6 +55,7 @@ class LiveOrchestrator:
         self.state = StateManager(STATE_PATH)
         self.signal_manager = SignalManager(cfg.signals)
         self.db = db_services
+        self.run_id = run_id or (db_services.run_id if db_services else None)
         self.safe_mode_threshold = 0
         self.safe_mode = None
         self.last_perf_push: Optional[datetime] = None
@@ -512,7 +515,7 @@ class LiveOrchestrator:
         )
         send_anomaly_card(self.webhook, payload)
         if self.db and self.db.system_monitor:
-            self.db.system_monitor.record_event("anomaly", "high", message, {"impact": impact})
+            self.db.system_monitor.record_event("anomaly", "high", message, {"impact": impact}, run_id=self.run_id)
 
     def _persist_safe_mode(self) -> None:
         if self.safe_mode:

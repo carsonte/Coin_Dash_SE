@@ -13,14 +13,18 @@ from .utils import utc_now
 
 
 class TradingRecorder:
-    def __init__(self, client: DatabaseClient) -> None:
+    def __init__(self, client: DatabaseClient, run_id: str | None = None) -> None:
         self.client = client
+        self.run_id = run_id
 
-    def record_signal(self, signal: SignalRecord, correlated: bool, signal_id: Optional[str] = None) -> None:
+    def record_signal(
+        self, signal: SignalRecord, correlated: bool, signal_id: Optional[str] = None, run_id: str | None = None
+    ) -> None:
         if not self.client.enabled:
             return
         identifier = signal_id or f"{signal.symbol}-{int(signal.created_at.timestamp())}"
         data = {
+            "run_id": run_id or self.run_id,
             "signal_id": identifier,
             "symbol": signal.symbol,
             "direction": signal.decision.decision,
@@ -54,10 +58,11 @@ class TradingRecorder:
                 return
             session.query(SignalEntry).filter(SignalEntry.signal_id == signal_id).update({"status": status})
 
-    def record_trade_open(self, trade: PaperTrade, signal_id: Optional[str] = None) -> None:
+    def record_trade_open(self, trade: PaperTrade, signal_id: Optional[str] = None, run_id: str | None = None) -> None:
         if not self.client.enabled:
             return
         payload = {
+            "run_id": run_id or self.run_id,
             "trade_id": trade.trade_id,
             "signal_id": signal_id,
             "symbol": trade.symbol,
@@ -81,13 +86,14 @@ class TradingRecorder:
                 return
             session.execute(stmt)
 
-    def record_trade_close(self, trade: PaperTrade) -> None:
+    def record_trade_close(self, trade: PaperTrade, run_id: str | None = None) -> None:
         if not self.client.enabled:
             return
         exit_price = trade.exit_price
         if exit_price is None:
             exit_price = trade.take if trade.exit_reason == "take profit" else trade.stop
         update = {
+            "run_id": run_id or self.run_id,
             "exit_price": exit_price,
             "exit_reason": trade.exit_reason,
             "exit_at": utc_now(),
@@ -108,10 +114,12 @@ class TradingRecorder:
         exit_price: float,
         reason: str,
         rr: float,
+        run_id: str | None = None,
     ) -> None:
         if not self.client.enabled:
             return
         payload = {
+            "run_id": run_id or self.run_id,
             "trade_id": position_id,
             "signal_id": None,
             "symbol": symbol,
@@ -145,10 +153,11 @@ class TradingRecorder:
                 return
             session.execute(stmt)
 
-    def upsert_position(self, position: PositionState, status: str = "open") -> None:
+    def upsert_position(self, position: PositionState, status: str = "open", run_id: str | None = None) -> None:
         if not self.client.enabled:
             return
         payload = {
+            "run_id": run_id or self.run_id,
             "position_id": position.id,
             "symbol": position.symbol,
             "side": position.side,
