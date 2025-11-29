@@ -93,3 +93,10 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
 更多文档
 --------
 - 详见 `Coin Dash se.md` 获取流程细节、指标与目录说明。
+
+日志前端与 API
+---------------
+- 后端日志接口：`uvicorn coin_dash.api:app --reload --port 8000`，Swagger：`http://127.0.0.1:8000/docs`，支持 `/api/decisions`、`/api/system-events`、`/api/stats` 等（时间窗+分页）。
+- 前端日志面板：`cd frontend && npm install && npm run dev`，浏览器访问 `http://127.0.0.1:5173`；后端地址不同可在 `frontend/.env` 配置 `VITE_API_BASE`。
+- 表格布局：固定列宽、单行省略（摘要/描述悬浮 Tooltip 查看全文），行高统一；列示例（决策表）：时间160/品种100/类型100/置信度80/Tokens120/延迟120/摘要300/run_id120/操作80。
+- 使用建议：运行 live/backtest 时带 `--run-id`，便于前端筛选（未指定会自动生成 `hostname-<timestamp>`）；时间范围必填。
