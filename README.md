@@ -11,6 +11,7 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
 - **符号切换**：默认符号改为 MT5 合约 `BTCUSDm`、`ETHUSDm`，并新增黄金 `XAUUSDm`（可在 `config.live.symbols` 直接跑多品种），live/backtest 示例命令同步更新。
 - **成交价来源**：PaperBroker 开仓价使用最新 bid/ask（多头用 ask，空头用 bid），确保模拟成交贴合盘口。
 - **预过滤增强**：GLM-4.5 预过滤支持 ```json 包裹/嵌套解析，观望卡会标注“GLM 预过滤（未调用 DeepSeek）”以区分静态观望与模型 hold。
+- **观望卡来源标注**：hold 时区分 GLM 预过滤跳过、DeepSeek 调用失败/超时、DeepSeek 未启用/缺少密钥，便于排查调用链。
 - **飞书推送验证**：`LARK_WEBHOOK` 写入 `.env` 后，可用 `python -m coin_dash.cli cards-test --symbol BTCUSDm` 快速发送测试卡片验证 webhook。
 - **黄金休盘检测**：`XAUUSDm` 若 bid/ask 缺失或最新 tick 超 180s 判定休盘，跳过 K 线/特征/DeepSeek/信号/纸盘；恢复有新 tick 后自动继续。
 

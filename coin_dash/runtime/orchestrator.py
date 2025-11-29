@@ -82,11 +82,7 @@ class LiveOrchestrator:
         self._maybe_send_daily_summary()
 
     def run_heartbeat(self, symbols: List[str]) -> None:
-        """轻量巡检心跳（中文）：
-        - 频率：建议 5 分钟一次，对齐到 5 分钟边界。
-        - 内容：仅更新市价/检测 TP/SL 触发；若短期价格偏离超过 ATR×阈值（signals.review_price_atr），触发临时 DeepSeek 复评。
-        - 不做：新信号生成/模式告警/绩效汇总等重任务，减少无效调用与成本。
-        """
+        """Lightweight heartbeat (5m): price update + TP/SL check + optional review trigger."""
         for symbol in symbols:
             quote, market_open = self._check_market_open(symbol)
             if not market_open:
@@ -103,7 +99,7 @@ class LiveOrchestrator:
                 self._handle_reviews(symbol, feature_ctx, latest_row)
             except Exception as exc:
                 traceback.print_exc()
-                self._send_anomaly(f"心跳执行异常：{exc}", impact=f"{symbol} 心跳失败")
+                self._send_anomaly(f"heartbeat error: {exc}", impact=f"{symbol} heartbeat failed")
 
     def _process_symbol(self, symbol: str, df: pd.DataFrame, quote: Optional[Dict[str, float]] = None) -> None:
         multi = self.pipeline.from_dataframe(symbol, df)
@@ -127,12 +123,19 @@ class LiveOrchestrator:
                     {
                         "type": "self_critique",
                         "symbol": symbol,
-                        "summary": "上一轮决策因价格/结构异常被 fallback 拒绝，需加强价格关系检查。",
+                        "summary": "Previous decision rejected by fallback; strengthen price/structure checks.",
                     }
                 )
-            reason = decision.reason or "AI 选择观望"
-            if getattr(decision, "meta", {}).get("adapter") == "prefilter":
-                reason = f"GLM 预过滤：{reason}（未调用 DeepSeek）"
+            meta = getattr(decision, "meta", {}) or {}
+            adapter = meta.get("adapter")
+            status = meta.get("status") or decision.reason
+            reason = decision.reason or "AI hold"
+            if adapter == "prefilter":
+                reason = f"GLM prefilter: {reason} (DeepSeek skipped)"
+            elif status == "deepseek_unavailable":
+                reason = "DeepSeek call failed/timeout, skip order"
+            elif status == "deepseek_disabled":
+                reason = "DeepSeek disabled or missing key, skip order"
             watch_payload = WatchPayload(
                 symbol=symbol,
                 reason=reason,
