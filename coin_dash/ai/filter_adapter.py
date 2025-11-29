@@ -140,10 +140,26 @@ class PreFilterClient:
         url = f"{self.endpoint}"
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         headers.update(self.extra_headers)
-        resp = self.session.post(url, json=payload, headers=headers, timeout=8)
-        resp.raise_for_status()
-        data = resp.json()
-        return data["choices"][0]["message"]["content"]
+        attempts = 3
+        last_exc: Exception | None = None
+        for i in range(attempts):
+            try:
+                resp = self.session.post(url, json=payload, headers=headers, timeout=8)
+                resp.raise_for_status()
+                data = resp.json()
+                return data["choices"][0]["message"]["content"]
+            except requests.RequestException as exc:
+                last_exc = exc
+                if i < attempts - 1:
+                    continue
+                raise
+            except Exception as exc:
+                last_exc = exc
+                if i < attempts - 1:
+                    continue
+                raise
+        if last_exc:
+            raise last_exc
 
     @staticmethod
     def _parse_json(content: str) -> Dict[str, Any]:
