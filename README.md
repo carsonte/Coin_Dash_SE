@@ -100,3 +100,4 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
 - 前端日志面板：`cd frontend && npm install && npm run dev`，浏览器访问 `http://127.0.0.1:5173`；后端地址不同可在 `frontend/.env` 配置 `VITE_API_BASE`。
 - 表格布局：固定列宽、单行省略（摘要/描述悬浮 Tooltip 查看全文），行高统一；列示例（决策表）：时间160/品种100/类型100/置信度80/Tokens120/延迟120/摘要300/run_id120/操作80。
 - 使用建议：运行 live/backtest 时带 `--run-id`，便于前端筛选（未指定会自动生成 `hostname-<timestamp>`）；时间范围必填。
+- 预过滤（GLM）：`ZHIPUAI_API_KEY` 配置后启用，模型可由 `ZHIPUAI_MODEL` 指定（如 `glm-4.5-air`）；预过滤请求默认超时 8s，内置 2 次重试（总 3 次），失败 fallback 放行 DeepSeek。
