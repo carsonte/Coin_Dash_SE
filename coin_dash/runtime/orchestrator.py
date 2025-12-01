@@ -1,4 +1,5 @@
 from __future__ import annotations
+import logging
 import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -29,6 +30,7 @@ from ..notify.lark import (
 )
 from ..ai.deepseek_adapter import DeepSeekClient
 from ..ai.safe_fallback import apply_fallback
+from ..ai.glm_filter import glm_screen_sync
 from ..verify.validator import ValidationContext, validate_signal
 from ..risk.position import position_size
 from ..signals.manager import SignalManager, SignalRecord
@@ -37,9 +39,11 @@ from ..notify.lark import ExitEventPayload
 from ..backtest.engine import _make_decision
 from ..db import DatabaseServices
 from ..performance.safe_mode import DailySafeMode
+from ..events.triggers import detect_market_events
 
 
 STATE_PATH = Path(__file__).resolve().parents[1] / "state" / "state.json"
+LOGGER = logging.getLogger(__name__)
 
 
 class LiveOrchestrator:
@@ -56,8 +60,16 @@ class LiveOrchestrator:
         self.signal_manager = SignalManager(cfg.signals)
         self.db = db_services
         self.run_id = run_id or (db_services.run_id if db_services else None)
-        self.safe_mode_threshold = 0
-        self.safe_mode = None
+        self.event_triggers_enabled = bool(getattr(cfg, "event_triggers", None) and cfg.event_triggers.enabled)
+        self.glm_filter_enabled = bool(getattr(cfg, "glm_filter", None) and cfg.glm_filter.enabled)
+        self.safe_mode_enabled = bool(getattr(cfg.performance, "safe_mode_enabled", False))
+        safe_cfg = getattr(cfg.performance, "safe_mode", {}) or {}
+        self.safe_mode_threshold = int(safe_cfg.get("consecutive_stop_losses", 0))
+        if self.safe_mode_enabled and self.safe_mode_threshold > 0:
+            saved_state = self.state.get_safe_mode_state()
+            self.safe_mode = DailySafeMode.from_dict(self.safe_mode_threshold, saved_state)
+        else:
+            self.safe_mode = None
         self.last_perf_push: Optional[datetime] = None
         self.paper_broker = PaperBroker(cfg.backtest.initial_equity, cfg.backtest.fee_rate)
         self.paper_positions: Dict[str, str] = {}
@@ -121,6 +133,56 @@ class LiveOrchestrator:
         latest_row = df.iloc[-1]
         self._check_exit_events(symbol, latest_row)
         self._handle_reviews(symbol, feature_ctx, latest_row)
+        now = datetime.now(timezone.utc)
+        if self.safe_mode_enabled and self.safe_mode and not self.safe_mode.can_trade(now):
+            print(f"[info] safe mode active, skip new opens for {symbol}")
+            return
+        if self.event_triggers_enabled:
+            events = detect_market_events(
+                {
+                    "features": feature_ctx.features,
+                    "structure": feature_ctx.structure,
+                    "frames": multi.frames,
+                    "symbol": symbol,
+                }
+            )
+            LOGGER.info(
+                "event gate checked symbol=%s severity=%s reasons=%s",
+                symbol,
+                events.get("severity"),
+                events.get("reasons"),
+            )
+            if not events.get("has_event", False):
+                LOGGER.info("event gate skip AI symbol=%s", symbol)
+                return
+        if self.glm_filter_enabled:
+            try:
+                screen = glm_screen_sync(
+                    {
+                        "features": feature_ctx.features,
+                        "market_mode": getattr(feature_ctx.market_mode, "name", None),
+                        "trend": {
+                            "score": feature_ctx.trend.score,
+                            "grade": feature_ctx.trend.grade,
+                            "global_direction": feature_ctx.trend.global_direction,
+                        },
+                        "structure": {
+                            name: {"support": lvl.support, "resistance": lvl.resistance}
+                            for name, lvl in feature_ctx.structure.levels.items()
+                        },
+                        "recent_ohlc": feature_ctx.recent_ohlc,
+                        "environment": feature_ctx.environment,
+                        "global_temperature": feature_ctx.global_temperature,
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning("glm_screen_exception symbol=%s err=%s", symbol, exc)
+                screen = {"should_call": True, "reason": f"fallback_exception:{exc}", "next_check_minutes": 5}
+            if "fallback" in str(screen.get("reason", "")):
+                LOGGER.warning("glm_filter_fallback_used symbol=%s detail=%s", symbol, screen)
+            if not screen.get("should_call", True):
+                LOGGER.info("glm_screen_hold symbol=%s detail=%s", symbol, screen)
+                return
 
         decision = _make_decision(self.cfg, self.deepseek, symbol, feature_ctx)
         decision = apply_fallback(decision, payload=getattr(decision, "meta", {}))

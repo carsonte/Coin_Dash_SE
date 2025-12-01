@@ -65,6 +65,8 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
 - **数据库**：`database` 可开启/关闭 SQLite 或其它 DSN。  
 - **预过滤**：命中强触发直接进入 DeepSeek；否则 GLM-4.5-Flash 返回 `should_call`。异常/解析失败时放行；若 GLM 判定市场安静未调用 DeepSeek，观望卡会标注“GLM 预过滤（未调用 DeepSeek）”。  
 - **MT5 实时数据源**：`data.provider=mt5_api` 时，行情来自 MT5 API（`/price`、`/ohlc`），tick_volume → volume；K 线按秒级时间戳升序写入 pipeline/特征；PaperBroker 开仓价取最新 bid/ask（多头用 ask，空头用 bid），不再依赖 CCXT。
+- **本地事件触发层**：`event_triggers.enabled=true` 时，仅在检测到本地波动/均线翻转/结构突破等事件后才进入 GLM / DeepSeek；默认 false 保持现有流程，便于在盘整期节约模型调用。
+- **GLM 机会初筛器**：`glm_filter.enabled=true` 时，在调用 DeepSeek 前使用 GLM 快速判定是否值得继续；包含重试/超时/解析兜底，失败会放行 DeepSeek。
 
 目录索引
 --------

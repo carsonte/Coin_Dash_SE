@@ -52,6 +52,7 @@ class RiskCfg(BaseModel):
     stop_buffer_pct: float = 0.02
     stop_atr_cap: float = 2.5
     trade_type_modifiers: Dict[str, TradeTypeModifier] = Field(default_factory=dict)
+    validation_enabled: bool = False
 
 
 class DeepSeekBudgetCfg(BaseModel):
@@ -120,6 +121,7 @@ class SignalsCfg(BaseModel):
 
 class PerformanceCfg(BaseModel):
     report_hour_utc8: int = 23
+    safe_mode_enabled: bool = False
     safe_mode: Dict[str, int] = Field(default_factory=dict)
     adaptive_thresholds: Dict[str, float] = Field(default_factory=dict)
     instant_push: bool = True
@@ -133,6 +135,14 @@ class NotificationsCfg(BaseModel):
 
 class LogCfg(BaseModel):
     level: str = "INFO"
+
+
+class GLMFilterCfg(BaseModel):
+    enabled: bool = True
+
+
+class EventTriggersCfg(BaseModel):
+    enabled: bool = False
 
 
 class AppConfig(BaseModel):
@@ -150,6 +160,8 @@ class AppConfig(BaseModel):
     performance: PerformanceCfg = Field(default_factory=PerformanceCfg)
     notifications: NotificationsCfg = Field(default_factory=NotificationsCfg)
     log: LogCfg = Field(default_factory=LogCfg)
+    event_triggers: EventTriggersCfg = Field(default_factory=EventTriggersCfg)
+    glm_filter: GLMFilterCfg = Field(default_factory=GLMFilterCfg)
 
 
 def load_config(path: Optional[Path] = None) -> AppConfig:

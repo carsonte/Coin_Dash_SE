@@ -62,6 +62,7 @@ market_filter:
 
 risk:
   risk_per_trade: 0.01        # 单笔风险占净值比例（AI仓位不指定时的兜底算法）
+  validation_enabled: false   # 是否启用本地风控校验（价格顺序/RR 边界），默认关闭
   rr_bounds:
     min: 1.5
     max: 5.0
@@ -86,6 +87,10 @@ signals:
     breakout: 2
     reversal: 3
   max_same_direction: 1       # 同向允许的最大活跃信号数（AI版已放开）
+event_triggers:
+  enabled: false              # 本地事件触发层：为 false 时保持现有行为；true 时无事件将跳过大模型调用
+glm_filter:
+  enabled: true               # GLM 预过滤层开关；false 时直接进入 DeepSeek（保持旧行为）
 
 deepseek:
   enabled: true
@@ -121,6 +126,7 @@ database:
 
 performance:
   report_hour_utc8: 23
+  safe_mode_enabled: false       # 是否启用安全模式开仓限制，默认关闭以保持原行为
   safe_mode:
     consecutive_stop_losses: 5  # 安全模式触发阈值（AI版默认已不启用）
   adaptive_thresholds:           # 自适应阈值设置（AI版已关闭阈值调整）
