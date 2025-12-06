@@ -269,7 +269,7 @@ class DeepSeekClient:
 - 你的输出会被系统直接用于模拟/实盘执行，请认真决策。
 
 系统会把你的 JSON 输出直接用于模拟/实盘执行，你负责：
-- 决定 action（long/short/hold）
+- 决定 decision（open_long/open_short/hold）
 - 决定入场价、止损价、止盈价（或 RR）
 - 决定 position_size（用仓位大小表达信心强弱）
 - 给出简明 reason、confidence 和下次复评时间（next_review_minutes）
@@ -380,11 +380,11 @@ class DeepSeekClient:
 你必须只输出一段 JSON，不要包含任何自然语言说明或 Markdown。
 
 要求：
-- 严格使用系统约定好的字段名（如 `action`、`direction`、`entry_price`、`stop_loss`、`take_profit`、`risk_reward`、`position_size`、`reason`、`confidence`、`next_review_minutes` 等），不要新增字段，也不要缺少字段。
-- `action` 只能是：\"long\", \"short\", \"hold\" 之一。
+- 严格使用系统约定好的字段名（如 `decision`、`entry_price`、`stop_loss`、`take_profit`、`risk_reward`、`position_size`、`reason`、`confidence`、`next_review_minutes` 等），不要新增字段，也不要缺少字段。
+- `decision` 只能是：`open_long`, `open_short`, `hold` 之一。
 - 若为 `hold`：
   - 仍需给出 `reason` 和合理的 `next_review_minutes`，说明什么条件出现时会考虑介入（例如突破某区间、回踩某位置等）。
-- 若为 `long` 或 `short`：
+- 若为 `open_long` 或 `open_short`：
   - `entry_price`：基于当前价格及结构，给出合理的入场价（可以是市价附近或挂单位置）；
   - `stop_loss`：必须放在结构外，而不是随意几个点；
   - `take_profit` 和 `risk_reward`：与止损位置匹配，尽量保证 RR ≥ 2，特殊极佳结构时可拉大 RR；
@@ -421,7 +421,9 @@ class DeepSeekClient:
             "- position_size: 若需要开仓请给出仓位大小（浮点数，未提供视为 0）\n"
             "- risk_score: 0-100，追第一根/噪声区追价/结构不清则加分\n"
             "- quality_score: 0-100，有二次确认/动能衰减过滤/区间边缘入场则加分\n"
-            "务必描述风险与行情结构，若追第一根突破/回撤或 quality_score < risk_score，请默认 hold。不要输出除 JSON 之外的内容。"
+            "务必描述风险与行情结构：若属于追第一根突破/回撤，或 quality_score 明显低于 risk_score，"
+            "可以优先减少 position_size 或给出轻仓试探方案；"
+            "只有在结构极差、风险远大于潜在收益时才选择 hold。不要输出除 JSON 之外的内容。"
         )
 
     def _review_task_text(self) -> str:
