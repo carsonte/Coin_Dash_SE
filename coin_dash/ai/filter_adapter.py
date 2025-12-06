@@ -1,19 +1,93 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 
 import requests
+from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from ..config import GLMFilterCfg
+
+LOGGER = logging.getLogger(__name__)
+
+TrendConsistency = tuple[str, ...]
+VolatilityStatus = tuple[str, ...]
+StructureRelevance = tuple[str, ...]
+PatternCandidate = tuple[str, ...]
+
+TREND_LEVELS: TrendConsistency = ("strong", "medium", "weak", "conflicting")
+VOL_LEVELS: VolatilityStatus = ("low", "normal", "high", "extreme")
+STRUCTURE_LEVELS: StructureRelevance = ("near_support", "near_resistance", "breakout_zone", "mid_range", "structure_missing")
+PATTERN_LEVELS: PatternCandidate = ("none", "breakout", "reversal", "trend_continuation")
+
+
+def _append_unique(target: List[str], values: Sequence[str]) -> None:
+    for val in values:
+        if val not in target:
+            target.append(val)
+
+
+def _normalize_enum(value: Any, allowed: Sequence[str], default: str) -> str:
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in allowed:
+            return lowered
+    return default
+
+
+class GlmFilterResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    should_call_deepseek: bool = True
+    reason: str = "ok: glm_filter"
+    trend_consistency: str = "weak"
+    volatility_status: str = "normal"
+    structure_relevance: str = "structure_missing"
+    pattern_candidate: str = "none"
+    danger_flags: List[str] = Field(default_factory=list)
+    met_conditions: List[str] = Field(default_factory=list)
+    failed_conditions: List[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_response(cls, data: Dict[str, Any]) -> "GlmFilterResult":
+        should = data.get("should_call_deepseek")
+        if should is None:
+            should = data.get("should_call")
+        base = {
+            "should_call_deepseek": bool(should) if should is not None else True,
+            "reason": str(data.get("reason") or "ok: glm_decision"),
+            "trend_consistency": _normalize_enum(data.get("trend_consistency"), TREND_LEVELS, "weak"),
+            "volatility_status": _normalize_enum(data.get("volatility_status"), VOL_LEVELS, "normal"),
+            "structure_relevance": _normalize_enum(data.get("structure_relevance"), STRUCTURE_LEVELS, "structure_missing"),
+            "pattern_candidate": _normalize_enum(data.get("pattern_candidate"), PATTERN_LEVELS, "none"),
+            "danger_flags": [str(flag).strip().lower() for flag in data.get("danger_flags", []) if flag is not None],
+            "met_conditions": [str(flag).strip().lower() for flag in data.get("met_conditions", []) if flag is not None],
+            "failed_conditions": [str(flag).strip().lower() for flag in data.get("failed_conditions", []) if flag is not None],
+        }
+        return cls(**base)
+
+    def model_dump_safe(self) -> Dict[str, Any]:
+        return self.model_dump()
 
 
 class PreFilterClient:
     """
-    Lightweight pre-decider backed by GLM-4.5-Flash to decide whether a DeepSeek
-    call is necessary. Falls back to True on any failure.
+    Market-state filter backed by GLM-4.5-Flash.
+    - 输出结构化标签（趋势一致性、波动、结构位置、形态候选等）。
+    - 按规则挡掉危险/垃圾行情，作为 DeepSeek 的成本守门人。
     """
 
-    def __init__(self, api_key: Optional[str] = None, endpoint: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        cfg: Optional["GLMFilterCfg"] = None,
+        api_key: Optional[str] = None,
+        endpoint: Optional[str] = None,
+    ) -> None:
+        self.enabled = bool(getattr(cfg, "enabled", True))
+        self.on_error = (getattr(cfg, "on_error", None) or "call_deepseek").lower()
         self.api_key = api_key or os.getenv("ZHIPUAI_API_KEY") or ""
         self.model = os.getenv("ZHIPUAI_MODEL", "glm-4.5-flash")
         self.endpoint = (
@@ -36,23 +110,39 @@ class PreFilterClient:
         feature_context: Dict[str, Any],
         position_state: Optional[Dict[str, Any]] = None,
         next_review_time: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        is_review: bool = False,
+    ) -> GlmFilterResult:
+        # 关闭或缺少 key 时，保持原行为：直接放行。
+        if not self.enabled:
+            return GlmFilterResult(
+                should_call_deepseek=True,
+                reason="prefilter_disabled",
+                trend_consistency="weak",
+                volatility_status="normal",
+                structure_relevance="structure_missing",
+                pattern_candidate="none",
+            )
+        strong = self._strong_triggers(feature_context, position_state)
+        if not self.api_key:
+            return GlmFilterResult(
+                should_call_deepseek=True,
+                reason="prefilter_skipped_no_api_key",
+                trend_consistency="weak",
+                volatility_status="normal",
+                structure_relevance="structure_missing",
+                pattern_candidate="none",
+                met_conditions=strong,
+            )
         try:
-            # Fast-path: strong triggers always force DeepSeek (no extra LLM call).
-            strong = self._strong_triggers(feature_context, position_state)
-            if strong:
-                return {"should_call": True, "reason": "; ".join(strong)}
-            if not self.api_key:
-                # No GLM key: keep behavior identical to原流程，直接放行 DeepSeek。
-                return {"should_call": True, "reason": "prefilter_skipped_no_api_key"}
-            payload = self._build_prompt(feature_context, position_state, next_review_time, model=self.model)
+            payload = self._build_prompt(feature_context, position_state, next_review_time, model=self.model, strong_triggers=strong)
             resp = self._chat_completion(payload)
             data = self._parse_json(resp)
-            should_call = bool(data.get("should_call", True))
-            reason = str(data.get("reason", "glm_decision"))
-            return {"should_call": should_call, "reason": reason}
-        except Exception as exc:
-            return {"should_call": True, "reason": f"prefilter_fallback:{exc}"}
+            glm_result = GlmFilterResult.from_response(data)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("glm_prefilter_error err=%s", exc)
+            return self._fallback_on_error(str(exc))
+        glm_result = self._apply_rules(glm_result, is_review=is_review, strong_triggers=strong)
+        return glm_result
 
     @staticmethod
     def _current_price(features: Dict[str, Any]) -> float:
@@ -115,18 +205,35 @@ class PreFilterClient:
         position_state: Optional[Dict[str, Any]],
         next_review_time: Optional[str],
         model: str,
+        strong_triggers: Sequence[str],
     ) -> Dict[str, Any]:
+        schema = (
+            "返回严格的 JSON（无多余文字）：\n"
+            '{\n'
+            '  "should_call_deepseek": true/false,\n'
+            '  "reason": "ok: ... / blocked: ...",\n'
+            '  "trend_consistency": "strong|medium|weak|conflicting",\n'
+            '  "volatility_status": "low|normal|high|extreme",\n'
+            '  "structure_relevance": "near_support|near_resistance|breakout_zone|mid_range|structure_missing",\n'
+            '  "pattern_candidate": "none|breakout|reversal|trend_continuation",\n'
+            '  "danger_flags": ["..."],\n'
+            '  "met_conditions": ["..."],\n'
+            '  "failed_conditions": ["..."]\n'
+            "}\n"
+        )
+        guardrails = [
+            "必须挡掉（should_call_deepseek=false）：趋势冲突、ATR 极端、长影/whipsaw、结构缺失或中轴、没有形态候选、流动性差。",
+            "应该放行：趋势 strong/medium，波动 normal/适度 high，结构在支撑/阻力/突破区，存在 breakout/reversal/trend_continuation 候选。",
+            "边界情况 trend=weak 或 high 波动可标记 marginal，附上 danger_flags，但仍可调用。",
+        ]
         content = [
-            "You are a JSON-only pre-decider. Reply with a JSON object: {\"should_call\": true/false, \"reason\": \"...\"}.",
-            "Goal: decide if we should call DeepSeek (trading LLM). Only skip when market is quiet or redundant.",
-            "Consider:",
-            "- recent price change (e.g., <0.1% over last bars -> maybe skip)",
-            "- structure proximity or breakout",
-            "- ATR expansion/volatility",
-            "- EMA alignment/flip",
-            "- open position drift vs entry",
-            "- next review time if provided",
-            "Be conservative: default should_call=true when uncertain.",
+            "你是“市场状态过滤器 + 成本守门人”，为 DeepSeek 决策做预筛。",
+            "仅输出 JSON，不要任何 Markdown 或解释。",
+            schema,
+            "决策规则（务必遵守）：",
+            *[f"- {line}" for line in guardrails],
+            "对输入的多周期特征做标签提取并给出 should_call_deepseek。",
+            f"strong_triggers: {json.dumps(list(strong_triggers), ensure_ascii=False)}",
             f"feature_context: {json.dumps(feature_context, ensure_ascii=False)}",
         ]
         if position_state:
@@ -134,7 +241,7 @@ class PreFilterClient:
         if next_review_time:
             content.append(f"next_review_time: {next_review_time}")
         messages = [{"role": "user", "content": "\n".join(content)}]
-        return {"model": model, "messages": messages, "temperature": 0}
+        return {"model": model, "messages": messages, "temperature": 0, "stream": False}
 
     def _chat_completion(self, payload: Dict[str, Any]) -> str:
         url = f"{self.endpoint}"
@@ -153,7 +260,7 @@ class PreFilterClient:
                 if i < attempts - 1:
                     continue
                 raise
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 last_exc = exc
                 if i < attempts - 1:
                     continue
@@ -184,3 +291,89 @@ class PreFilterClient:
                 except Exception:
                     pass
             raise ValueError(f"prefilter JSON parse error: {content}") from exc
+
+    def _apply_rules(self, result: GlmFilterResult, is_review: bool, strong_triggers: Sequence[str]) -> GlmFilterResult:
+        res = result.copy(deep=True)
+        _append_unique(res.met_conditions, strong_triggers)
+
+        def block(reason: str, flag: Optional[str] = None, failed: Optional[str] = None) -> None:
+            res.should_call_deepseek = False
+            res.reason = reason
+            if flag:
+                _append_unique(res.danger_flags, [flag])
+            if failed:
+                _append_unique(res.failed_conditions, [failed])
+
+        # 硬性挡掉
+        if res.trend_consistency == "conflicting":
+            block("blocked: trend_conflict", "trend_conflict", "trend_conflict")
+        if res.volatility_status == "extreme":
+            block("blocked: atr_extreme", "atr_extreme", "atr_extreme")
+        if res.structure_relevance == "mid_range":
+            block("blocked: mid_range_structure", "no_structure_edge", "mid_range_structure")
+        if res.structure_relevance == "structure_missing":
+            block("blocked: structure_missing", "structure_missing", "structure_missing")
+        if res.pattern_candidate == "none":
+            block("blocked: no_pattern_candidate", "no_pattern_candidate", "no_pattern_candidate")
+        if any(flag in res.danger_flags for flag in ("wick_noise", "whipsaw", "wick", "noise")):
+            block("blocked: wick_noise", "wick_noise", "wick_noise")
+        if any(flag in res.danger_flags for flag in ("low_liquidity",)):
+            block("blocked: low_liquidity", "low_liquidity", "low_liquidity")
+        if any(flag in res.danger_flags for flag in ("chop_range", "choppy", "chop")):
+            block("blocked: chop_range", "chop_range", "chop_range")
+
+        # 记录满足/不满足的条件
+        allow_trend = res.trend_consistency in ("strong", "medium")
+        allow_vol = res.volatility_status in ("normal", "high")
+        allow_structure = res.structure_relevance in ("near_support", "near_resistance", "breakout_zone")
+        allow_pattern = res.pattern_candidate in ("breakout", "reversal", "trend_continuation")
+        if allow_trend:
+            _append_unique(res.met_conditions, ["trend_ok"])
+        else:
+            _append_unique(res.failed_conditions, ["trend_weak"])
+        if allow_vol:
+            _append_unique(res.met_conditions, ["volatility_ok"])
+        else:
+            _append_unique(res.failed_conditions, ["volatility_outside"])
+        if allow_structure:
+            _append_unique(res.met_conditions, ["structure_ok"])
+        else:
+            _append_unique(res.failed_conditions, ["structure_not_ready"])
+        if allow_pattern:
+            _append_unique(res.met_conditions, ["pattern_candidate_ok"])
+        else:
+            _append_unique(res.failed_conditions, ["pattern_missing"])
+
+        if not res.should_call_deepseek:
+            return res
+
+        good = allow_trend and allow_vol and allow_structure and allow_pattern
+        marginal = allow_structure and allow_pattern and res.trend_consistency != "conflicting" and res.volatility_status != "extreme"
+
+        if good:
+            res.should_call_deepseek = True
+            res.reason = res.reason or "ok: good_opportunity"
+        elif is_review:
+            res.should_call_deepseek = True
+            res.reason = res.reason or "ok: review_priority"
+        elif marginal:
+            res.should_call_deepseek = True
+            res.reason = res.reason or "ok: marginal"
+        else:
+            res.should_call_deepseek = False
+            res.reason = res.reason or "blocked: insufficient_edge"
+        return res
+
+    def _fallback_on_error(self, detail: str) -> GlmFilterResult:
+        should_call = self.on_error == "call_deepseek"
+        reason = f"prefilter_error:{detail}"
+        return GlmFilterResult(
+            should_call_deepseek=should_call,
+            reason=reason,
+            trend_consistency="weak",
+            volatility_status="normal",
+            structure_relevance="structure_missing",
+            pattern_candidate="none",
+            danger_flags=["glm_error"],
+            failed_conditions=["glm_error"],
+        )

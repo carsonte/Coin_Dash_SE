@@ -29,8 +29,8 @@ from ..notify.lark import (
     WatchPayload,
 )
 from ..ai.deepseek_adapter import DeepSeekClient
+from ..ai.filter_adapter import GlmFilterResult, PreFilterClient
 from ..ai.safe_fallback import apply_fallback
-from ..ai.glm_filter import glm_screen_sync
 from ..verify.validator import ValidationContext, validate_signal
 from ..risk.position import position_size
 from ..signals.manager import SignalManager, SignalRecord
@@ -54,7 +54,7 @@ class LiveOrchestrator:
         self.fetcher = LiveDataFetcher(cfg)
         self.pipeline = DataPipeline(cfg)
         decision_logger = db_services.ai_logger if (db_services and db_services.ai_logger) else None
-        self.deepseek = DeepSeekClient(cfg.deepseek, decision_logger=decision_logger)
+        self.deepseek = DeepSeekClient(cfg.deepseek, glm_cfg=cfg.glm_filter, decision_logger=decision_logger)
         self.webhook = webhook or cfg.notifications.lark_webhook
         self.state = StateManager(STATE_PATH)
         self.signal_manager = SignalManager(cfg.signals)
@@ -62,6 +62,7 @@ class LiveOrchestrator:
         self.run_id = run_id or (db_services.run_id if db_services else None)
         self.event_triggers_enabled = bool(getattr(cfg, "event_triggers", None) and cfg.event_triggers.enabled)
         self.glm_filter_enabled = bool(getattr(cfg, "glm_filter", None) and cfg.glm_filter.enabled)
+        self.glm_prefilter = PreFilterClient(cfg.glm_filter) if self.glm_filter_enabled else None
         self.safe_mode_enabled = bool(getattr(cfg.performance, "safe_mode_enabled", False))
         safe_cfg = getattr(cfg.performance, "safe_mode", {}) or {}
         self.safe_mode_threshold = int(safe_cfg.get("consecutive_stop_losses", 0))
@@ -155,36 +156,67 @@ class LiveOrchestrator:
             if not events.get("has_event", False):
                 LOGGER.info("event gate skip AI symbol=%s", symbol)
                 return
-        if self.glm_filter_enabled:
+        glm_result: GlmFilterResult | None = None
+        if self.glm_filter_enabled and self.glm_prefilter:
+            glm_context = {
+                "features": feature_ctx.features,
+                "market_mode": getattr(feature_ctx.market_mode, "name", None),
+                "mode_confidence": getattr(feature_ctx.market_mode, "confidence", None),
+                "trend": {
+                    "score": feature_ctx.trend.score,
+                    "grade": feature_ctx.trend.grade,
+                    "global_direction": feature_ctx.trend.global_direction,
+                },
+                "structure": {
+                    name: {"support": lvl.support, "resistance": lvl.resistance}
+                    for name, lvl in feature_ctx.structure.levels.items()
+                },
+                "recent_ohlc": feature_ctx.recent_ohlc,
+                "environment": feature_ctx.environment,
+                "global_temperature": feature_ctx.global_temperature,
+            }
             try:
-                screen = glm_screen_sync(
-                    {
-                        "features": feature_ctx.features,
-                        "market_mode": getattr(feature_ctx.market_mode, "name", None),
-                        "trend": {
-                            "score": feature_ctx.trend.score,
-                            "grade": feature_ctx.trend.grade,
-                            "global_direction": feature_ctx.trend.global_direction,
-                        },
-                        "structure": {
-                            name: {"support": lvl.support, "resistance": lvl.resistance}
-                            for name, lvl in feature_ctx.structure.levels.items()
-                        },
-                        "recent_ohlc": feature_ctx.recent_ohlc,
-                        "environment": feature_ctx.environment,
-                        "global_temperature": feature_ctx.global_temperature,
-                    }
-                )
+                glm_result = self.glm_prefilter.should_call_deepseek(glm_context)
             except Exception as exc:  # noqa: BLE001
                 LOGGER.warning("glm_screen_exception symbol=%s err=%s", symbol, exc)
-                screen = {"should_call": True, "reason": f"fallback_exception:{exc}", "next_check_minutes": 5}
-            if "fallback" in str(screen.get("reason", "")):
-                LOGGER.warning("glm_filter_fallback_used symbol=%s detail=%s", symbol, screen)
-            if not screen.get("should_call", True):
-                LOGGER.info("glm_screen_hold symbol=%s detail=%s", symbol, screen)
+                glm_result = GlmFilterResult(
+                    should_call_deepseek=self.cfg.glm_filter.on_error == "call_deepseek",
+                    reason=f"prefilter_exception:{exc}",
+                    danger_flags=["glm_error"],
+                    failed_conditions=["glm_error"],
+                )
+            if self.db and getattr(self.db, "system_monitor", None):
+                severity = "info"
+                if glm_result and (
+                    not glm_result.should_call_deepseek
+                    or "prefilter_error" in glm_result.reason
+                    or "prefilter_exception" in glm_result.reason
+                ):
+                    severity = "warning"
+                self.db.system_monitor.record_event(
+                    "FILTER_TRIGGER",
+                    severity,
+                    f"glm_filter_result symbol={symbol} reason={glm_result.reason if glm_result else 'missing'}",
+                    payload={"symbol": symbol, "glm_filter": glm_result.model_dump_safe() if glm_result else {}},
+                )
+            if glm_result and not glm_result.should_call_deepseek:
+                LOGGER.info("glm_screen_hold symbol=%s detail=%s", symbol, glm_result.model_dump_safe())
+                reason = glm_result.reason
+                watch_payload = WatchPayload(
+                    symbol=symbol,
+                    reason=(
+                        f"GLM 预过滤：{reason} "
+                        f"(trend={glm_result.trend_consistency}, vol={glm_result.volatility_status}, "
+                        f"struct={glm_result.structure_relevance}, pattern={glm_result.pattern_candidate})"
+                    ),
+                    market_note=feature_ctx.reason,
+                    confidence=None,
+                    next_check=datetime.now(timezone.utc) + timedelta(minutes=self.cfg.signals.review_interval_minutes),
+                )
+                send_watch_card(self.webhook, watch_payload)
                 return
 
-        decision = _make_decision(self.cfg, self.deepseek, symbol, feature_ctx)
+        decision = _make_decision(self.cfg, self.deepseek, symbol, feature_ctx, glm_result)
         decision = apply_fallback(decision, payload=getattr(decision, "meta", {}))
         if decision.decision == "hold":
             if "fallback" in (decision.reason or ""):
@@ -422,6 +454,17 @@ class LiveOrchestrator:
                 "trend_grade": feature_ctx.trend.grade,
                 "price": price,
             },
+            "features": feature_ctx.features,
+            "structure": {
+                name: {
+                    "support": lvl.support,
+                    "resistance": lvl.resistance,
+                }
+                for name, lvl in feature_ctx.structure.levels.items()
+            },
+            "market_mode": feature_ctx.market_mode.name,
+            "trend_grade": feature_ctx.trend.grade,
+            "mode_confidence": feature_ctx.market_mode.confidence,
             "recent_ohlc": feature_ctx.recent_ohlc,
             "environment": feature_ctx.environment,
             "global_temperature": feature_ctx.global_temperature,

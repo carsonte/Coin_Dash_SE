@@ -7,8 +7,8 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import requests
 
-from ..config import DeepSeekCfg
-from .filter_adapter import PreFilterClient
+from ..config import DeepSeekCfg, GLMFilterCfg
+from .filter_adapter import GlmFilterResult, PreFilterClient
 from .context import ConversationManager
 from .models import Decision, ReviewDecision
 if TYPE_CHECKING:
@@ -19,6 +19,7 @@ class DeepSeekClient:
     def __init__(
         self,
         cfg: DeepSeekCfg,
+        glm_cfg: Optional[GLMFilterCfg] = None,
         conversation: Optional[ConversationManager] = None,
         decision_logger: Optional["AIDecisionLogger"] = None,
     ) -> None:
@@ -28,7 +29,7 @@ class DeepSeekClient:
         self.api_key = os.getenv("DEEPSEEK_API_KEY")
         self.api_base = os.getenv("DEEPSEEK_API_BASE", cfg.api_base).rstrip("/")
         self.ai_logger = decision_logger
-        self.prefilter = PreFilterClient()
+        self.prefilter = PreFilterClient(glm_cfg)
 
     def enabled(self) -> bool:
         return self.cfg.enabled and bool(self.api_key)
@@ -46,9 +47,11 @@ class DeepSeekClient:
     def decide_trade(self, symbol: str, payload: Dict[str, Any]) -> Decision:
         # Pre-filter: small/quiet market may skip DeepSeek to省调用；强触发已在 filter_adapter 兜底。
         prefilter = self._prefilter_gate(payload)
-        if prefilter and not prefilter.get("should_call", True):
+        if prefilter:
+            payload["glm_filter_result"] = prefilter.model_dump_safe()
+        if prefilter and not prefilter.should_call_deepseek:
             price = self._price_from_payload(payload)
-            reason = prefilter.get("reason", "prefilter_hold")
+            reason = prefilter.reason or "prefilter_hold"
             return Decision(
                 decision="hold",
                 entry_price=price,
@@ -57,7 +60,7 @@ class DeepSeekClient:
                 risk_reward=0.0,
                 confidence=0.0,
                 reason=reason,
-                meta={"adapter": "prefilter"},
+                meta={"adapter": "prefilter", "glm_filter": payload.get("glm_filter_result")},
             )
         context = self.conversation.get_context(f"open:{symbol}", symbol)
         shared = self.conversation.get_shared_context()
@@ -116,8 +119,10 @@ class DeepSeekClient:
         shared = self.conversation.get_shared_context()
         # 复评同样受预过滤保护，保持 hold 返回格式一致。
         prefilter = self._prefilter_gate(payload, position_state=payload.get("position"), next_review_time=payload.get("next_review"))
-        if prefilter and not prefilter.get("should_call", True):
-            return ReviewDecision(action="hold", reason=prefilter.get("reason", "prefilter_hold"))
+        if prefilter:
+            payload["glm_filter_result"] = prefilter.model_dump_safe()
+        if prefilter and not prefilter.should_call_deepseek:
+            return ReviewDecision(action="hold", reason=prefilter.reason or "prefilter_hold")
         review_prompt = self._build_review_prompt(symbol, payload, context, shared)
         content, tokens_used, latency_ms = self._chat_completion(
             model=self.cfg.review_model,
@@ -457,6 +462,7 @@ class DeepSeekClient:
             "risk_score_hint": payload.get("risk_score_hint"),
             "quality_score_hint": payload.get("quality_score_hint"),
             "structure": payload.get("structure"),
+            "glm_filter": payload.get("glm_filter_result"),
             "context": context or [],
             "shared_memory": shared or [],
         }
@@ -488,6 +494,7 @@ class DeepSeekClient:
             "market": payload.get("market"),
             "environment": payload.get("environment"),
             "global_temperature": payload.get("global_temperature"),
+            "glm_filter": payload.get("glm_filter_result"),
             "context": context or [],
             "shared_memory": shared or [],
         }
@@ -525,8 +532,10 @@ class DeepSeekClient:
         payload: Dict[str, Any],
         position_state: Optional[Dict[str, Any]] = None,
         next_review_time: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[GlmFilterResult]:
         try:
+            if payload.get("glm_filter_result"):
+                return GlmFilterResult.from_response(payload["glm_filter_result"])
             feature_context = {
                 "features": payload.get("features") or {},
                 "structure": payload.get("structure") or {},
@@ -535,7 +544,12 @@ class DeepSeekClient:
                 "mode_confidence": payload.get("mode_confidence"),
                 "recent_ohlc": payload.get("recent_ohlc") or {},
             }
-            return self.prefilter.should_call_deepseek(feature_context, position_state, next_review_time)
+            return self.prefilter.should_call_deepseek(
+                feature_context,
+                position_state,
+                next_review_time,
+                is_review=bool(position_state),
+            )
         except Exception:
             return None
 

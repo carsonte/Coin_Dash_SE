@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Literal
 
 import yaml
 from pydantic import BaseModel, Field
@@ -139,6 +139,7 @@ class LogCfg(BaseModel):
 
 class GLMFilterCfg(BaseModel):
     enabled: bool = True
+    on_error: Literal["call_deepseek", "hold"] = "call_deepseek"
 
 
 class EventTriggersCfg(BaseModel):

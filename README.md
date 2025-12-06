@@ -11,7 +11,7 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
 - **MT5 实时行情**：新增 `mt5_api` 数据源（默认启用），从 Exness-MT5 API 拉取 `/ohlc`、`/price`；tick_volume → volume，秒级时间戳升序。`data.provider` 可切换回 `ccxt`。
 - **符号切换**：默认符号改为 MT5 合约 `BTCUSDm`、`ETHUSDm`，并新增黄金 `XAUUSDm`（可在 `config.live.symbols` 直接跑多品种），live/backtest 示例命令同步更新。
 - **成交价来源**：PaperBroker 开仓价使用最新 bid/ask（多头用 ask，空头用 bid），确保模拟成交贴合盘口。
-- **预过滤增强**：GLM-4.5 预过滤支持 ```json 包裹/嵌套解析，观望卡会标注“GLM 预过滤（未调用 DeepSeek）”以区分静态观望与模型 hold。
+- **GLM 预过滤升级**：预过滤输出结构化 `GlmFilterResult`（趋势一致性/波动/结构位置/形态候选/危险标签），按“市场状态过滤器 + 成本守门人”规则挡掉趋势冲突、ATR 极端、结构中轴/缺失、无形态候选、whipsaw/流动性差；`glm_filter.on_error` 可选 `call_deepseek/hold` 兜底，标签透传给 DeepSeek 提升决策上下文。
 - **飞书推送验证**：`LARK_WEBHOOK` 写入 `.env` 后，可用 `python -m coin_dash.cli cards-test --symbol BTCUSDm` 快速发送测试卡片验证 webhook。
 - **黄金休盘检测**：`XAUUSDm` 若 bid/ask 缺失或最新 tick 超 180s 判定休盘，跳过 K 线/特征/DeepSeek/信号/纸盘；恢复有新 tick 后自动继续。
 
@@ -64,7 +64,7 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
 - **安全模式**：`performance.safe_mode` 可设置连续止损阈值（默认关闭）。  
 - **通知**：`notifications` 中配置飞书 webhook 和签名秘钥。  
 - **数据库**：`database` 可开启/关闭 SQLite 或其它 DSN。  
-- **预过滤**：命中强触发直接进入 DeepSeek；否则 GLM-4.5-Flash 返回 `should_call`。异常/解析失败时放行；若 GLM 判定市场安静未调用 DeepSeek，观望卡会标注“GLM 预过滤（未调用 DeepSeek）”。  
+- **预过滤**：命中强触发直接进入 DeepSeek；GLM-4.5-Flash 返回结构化 `GlmFilterResult`（trend_consistency、volatility_status、structure_relevance、pattern_candidate、danger_flags、should_call_deepseek）；挡掉趋势冲突/ATR 极端/结构中轴或缺失/无形态候选/whipsaw/低流动性等。`glm_filter.on_error` 控制失败兜底（call_deepseek/hold）。标签会被透传给 DeepSeek 提升决策上下文；观望卡会标注“GLM 预过滤（未调用 DeepSeek）”。  
 - **MT5 实时数据源**：`data.provider=mt5_api` 时，行情来自 MT5 API（`/price`、`/ohlc`），tick_volume → volume；K 线按秒级时间戳升序写入 pipeline/特征；PaperBroker 开仓价取最新 bid/ask（多头用 ask，空头用 bid），不再依赖 CCXT。
 - **本地事件触发层**：`event_triggers.enabled=true` 时，仅在检测到本地波动/均线翻转/结构突破等事件后才进入 GLM / DeepSeek；默认 false 保持现有流程，便于在盘整期节约模型调用。
 - **GLM 机会初筛器**：`glm_filter.enabled=true` 时，在调用 DeepSeek 前使用 GLM 快速判定是否值得继续；包含重试/超时/解析兜底，失败会放行 DeepSeek。
@@ -83,8 +83,8 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
 
 测试
 ----
-- 2025-11-21：`pytest --maxfail=1 --disable-warnings` · passed  
-- 预过滤层：未单测，GLM 请求异常或 JSON 解析错误自动放行 DeepSeek
+- 2025-11-24：`pytest --maxfail=1 --disable-warnings` · passed  
+- 预过滤层：GLM 异常/解析错误按 `glm_filter.on_error` 兜底（默认放行 DeepSeek）
 
 注意
 ----
@@ -96,6 +96,7 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
 更多文档
 --------
 - 详见 `Coin Dash se.md` 获取流程细节、指标与目录说明。
+- GLM 预过滤结构与规则：`docs/glm_filter.md`
 
 日志前端与 API
 ---------------

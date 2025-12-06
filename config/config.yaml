@@ -91,6 +91,7 @@ event_triggers:
   enabled: false              # 本地事件触发层：为 false 时保持现有行为；true 时无事件将跳过大模型调用
 glm_filter:
   enabled: true               # GLM 预过滤层开关；false 时直接进入 DeepSeek（保持旧行为）
+  on_error: call_deepseek     # call_deepseek | hold：GLM 异常时的兜底策略
 
 deepseek:
   enabled: true

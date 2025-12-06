@@ -11,6 +11,7 @@ from ..config import AppConfig
 from ..data.pipeline import DataPipeline
 from ..features.multi_timeframe import compute_feature_context
 from ..features.trend import classify_trade_type
+from ..ai.filter_adapter import GlmFilterResult
 from ..ai.mock_adapter import decide_mock
 from ..ai.deepseek_adapter import DeepSeekClient
 from ..ai.models import Decision
@@ -50,7 +51,7 @@ def run_backtest(
     broker = PaperBroker(cfg.backtest.initial_equity, cfg.backtest.fee_rate)
     tracker = PerformanceTracker()
     decision_logger = db_services.ai_logger if (db_services and db_services.ai_logger) else None
-    deepseek_client = DeepSeekClient(cfg.deepseek, decision_logger=decision_logger) if use_deepseek else None
+    deepseek_client = DeepSeekClient(cfg.deepseek, glm_cfg=cfg.glm_filter, decision_logger=decision_logger) if use_deepseek else None
     safe_mode_cfg = cfg.performance.safe_mode or {}
     safe_mode_threshold = safe_mode_cfg.get("consecutive_stop_losses", 0)
     safe_mode = DailySafeMode(safe_mode_threshold)
@@ -200,7 +201,13 @@ def _infer_minutes(df: pd.DataFrame) -> int:
     return int(delta.total_seconds() // 60)
 
 
-def _make_decision(cfg: AppConfig, client: Optional[DeepSeekClient], symbol: str, feature_ctx) -> Decision:
+def _make_decision(
+    cfg: AppConfig,
+    client: Optional[DeepSeekClient],
+    symbol: str,
+    feature_ctx,
+    glm_result: GlmFilterResult | None = None,
+) -> Decision:
     def _hold(reason: str) -> Decision:
         price = feature_ctx.features.get("price_30m")
         if price is None:
@@ -238,6 +245,8 @@ def _make_decision(cfg: AppConfig, client: Optional[DeepSeekClient], symbol: str
             for name, lvl in feature_ctx.structure.levels.items()
         },
     }
+    if glm_result:
+        payload["glm_filter_result"] = glm_result.model_dump_safe()
     if client is None or not client.enabled():
         return _hold("deepseek_disabled")
     try:
