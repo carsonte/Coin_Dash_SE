@@ -64,7 +64,7 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
 - **安全模式**：`performance.safe_mode` 可设置连续止损阈值（默认关闭）。  
 - **通知**：`notifications` 中配置飞书 webhook 和签名秘钥。  
 - **数据库**：`database` 可开启/关闭 SQLite 或其它 DSN。  
-- **预过滤**：命中强触发直接进入 DeepSeek；GLM-4.5-Flash 返回结构化 `GlmFilterResult`（trend_consistency、volatility_status、structure_relevance、pattern_candidate、danger_flags、should_call_deepseek）；挡掉趋势冲突/ATR 极端/结构中轴或缺失/无形态候选/whipsaw/低流动性等。`glm_filter.on_error` 控制失败兜底（call_deepseek/hold）。标签会被透传给 DeepSeek 提升决策上下文；观望卡会标注“GLM 预过滤（未调用 DeepSeek）”。  
+- **预过滤 + DeepSeek 集成**：命中强触发直接进入 DeepSeek；GLM-4.5-Flash 返回结构化 `GlmFilterResult`（trend_consistency、volatility_status、structure_relevance、pattern_candidate、danger_flags、should_call_deepseek）；挡掉趋势冲突/ATR 极端/结构中轴或缺失/无形态候选/whipsaw/低流动性等。`glm_filter.on_error` 控制失败兜底（call_deepseek/hold）。标签会被透传到 DeepSeek Prompt 的“GLM Market Filter”段，指示大环境无需重复判断、专注形态真假与入场/风控设计；危险标签（atr_extreme/low_liquidity/wick_noise 等）会提醒无持仓偏观望、复评优先控仓。观望卡会标注“GLM 预过滤（未调用 DeepSeek）”。  
 - **MT5 实时数据源**：`data.provider=mt5_api` 时，行情来自 MT5 API（`/price`、`/ohlc`），tick_volume → volume；K 线按秒级时间戳升序写入 pipeline/特征；PaperBroker 开仓价取最新 bid/ask（多头用 ask，空头用 bid），不再依赖 CCXT。
 - **本地事件触发层**：`event_triggers.enabled=true` 时，仅在检测到本地波动/均线翻转/结构突破等事件后才进入 GLM / DeepSeek；默认 false 保持现有流程，便于在盘整期节约模型调用。
 - **GLM 机会初筛器**：`glm_filter.enabled=true` 时，在调用 DeepSeek 前使用 GLM 快速判定是否值得继续；包含重试/超时/解析兜底，失败会放行 DeepSeek。
@@ -84,7 +84,7 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
 测试
 ----
 - 2025-11-24：`pytest --maxfail=1 --disable-warnings` · passed  
-- 预过滤层：GLM 异常/解析错误按 `glm_filter.on_error` 兜底（默认放行 DeepSeek）
+- 预过滤层：GLM 异常/解析错误按 `glm_filter.on_error` 兜底（默认放行 DeepSeek）；GLM 标签在决策记录中以 `glm_snapshot` 保存，便于前端/日志展示
 
 注意
 ----
