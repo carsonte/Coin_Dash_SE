@@ -221,7 +221,8 @@ def _make_decision(
             risk_reward=0.0,
             confidence=0.0,
             reason=reason,
-            meta={"adapter": "deepseek", "status": reason},
+            meta={"adapter": "deepseek", "status": reason, "glm_filter": glm_result.model_dump_safe() if glm_result else None},
+            glm_snapshot=glm_result.model_dump_safe() if glm_result else None,
         )
 
     hints = _risk_quality_hint(feature_ctx)
@@ -250,7 +251,7 @@ def _make_decision(
     if client is None or not client.enabled():
         return _hold("deepseek_disabled")
     try:
-        decision = client.decide_trade(symbol, payload)
+        decision = client.decide_trade(symbol, payload, glm_result=glm_result)
         return decision
     except Exception:
         return _hold("deepseek_unavailable")

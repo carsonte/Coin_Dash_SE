@@ -17,6 +17,7 @@ class Decision:
     meta: Dict[str, Any] = field(default_factory=dict)
     risk_score: float = 0.0
     quality_score: float = 0.0
+    glm_snapshot: Optional[Dict[str, Any]] = None
 
     def recompute_rr(self) -> float:
         """

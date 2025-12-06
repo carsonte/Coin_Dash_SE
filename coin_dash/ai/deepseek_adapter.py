@@ -44,8 +44,10 @@ class DeepSeekClient:
         self.conversation.append(f"open:{symbol}", symbol, "system", json.dumps(event, ensure_ascii=False))
         self.conversation.add_shared_event(event)
 
-    def decide_trade(self, symbol: str, payload: Dict[str, Any]) -> Decision:
+    def decide_trade(self, symbol: str, payload: Dict[str, Any], glm_result: Optional[GlmFilterResult] = None) -> Decision:
         # Pre-filter: small/quiet market may skip DeepSeek to省调用；强触发已在 filter_adapter 兜底。
+        if glm_result and "glm_filter_result" not in payload:
+            payload["glm_filter_result"] = glm_result.model_dump_safe()
         prefilter = self._prefilter_gate(payload)
         if prefilter:
             payload["glm_filter_result"] = prefilter.model_dump_safe()
@@ -61,6 +63,7 @@ class DeepSeekClient:
                 confidence=0.0,
                 reason=reason,
                 meta={"adapter": "prefilter", "glm_filter": payload.get("glm_filter_result")},
+                glm_snapshot=payload.get("glm_filter_result"),
             )
         context = self.conversation.get_context(f"open:{symbol}", symbol)
         shared = self.conversation.get_shared_context()
@@ -108,16 +111,21 @@ class DeepSeekClient:
             risk_score=self._to_float(data.get("risk_score")) or 0.0,
             quality_score=self._to_float(data.get("quality_score")) or 0.0,
             meta=data,
+            glm_snapshot=payload.get("glm_filter_result"),
         )
         decision.recompute_rr()
         return decision
 
-    def review_position(self, symbol: str, position_id: str, payload: Dict[str, Any]) -> ReviewDecision:
+    def review_position(
+        self, symbol: str, position_id: str, payload: Dict[str, Any], glm_result: Optional[GlmFilterResult] = None
+    ) -> ReviewDecision:
         note = payload.get("context_note") or f"review request for {symbol}"
         self.conversation.append(position_id, symbol, "user", note)
         context = self.conversation.get_context(position_id, symbol)
         shared = self.conversation.get_shared_context()
         # 复评同样受预过滤保护，保持 hold 返回格式一致。
+        if glm_result and "glm_filter_result" not in payload:
+            payload["glm_filter_result"] = glm_result.model_dump_safe()
         prefilter = self._prefilter_gate(payload, position_state=payload.get("position"), next_review_time=payload.get("next_review"))
         if prefilter:
             payload["glm_filter_result"] = prefilter.model_dump_safe()
@@ -449,6 +457,7 @@ class DeepSeekClient:
         context: Optional[List[Any]],
         shared: Optional[List[Any]],
     ) -> str:
+        glm_section = self._glm_context_block(payload.get("glm_filter_result"), review=False, has_position=False)
         market_bundle = {
             "symbol": symbol,
             "market_mode": payload.get("market_mode"),
@@ -471,6 +480,8 @@ class DeepSeekClient:
         sections = [
             "=== Instruction ===",
             self._instruction_block(),
+            "=== GLM Market Filter ===",
+            glm_section or "（未提供 GLM 标签，按常规方式评估。）",
             "=== Market Features ===",
             features_json,
             "=== Multi-Timeframe Price Sequences ===",
@@ -488,6 +499,7 @@ class DeepSeekClient:
         context: Optional[List[Any]],
         shared: Optional[List[Any]],
     ) -> str:
+        glm_section = self._glm_context_block(payload.get("glm_filter_result"), review=True, has_position=bool(payload.get("position")))
         review_bundle = {
             "symbol": symbol,
             "position": payload.get("position"),
@@ -503,6 +515,8 @@ class DeepSeekClient:
         sections = [
             "=== Instruction ===",
             self._instruction_block(review=True),
+            "=== GLM Market Filter ===",
+            glm_section or "（未提供 GLM 标签，按常规方式评估。）",
             "=== Market Features ===",
             features_json,
             "=== Multi-Timeframe Price Sequences ===",
@@ -512,6 +526,30 @@ class DeepSeekClient:
             self._review_task_text(),
         ]
         return "\n".join(sections)
+
+    @staticmethod
+    def _glm_context_block(glm: Optional[Dict[str, Any]], review: bool = False, has_position: bool = False) -> Optional[str]:
+        if not glm:
+            return None
+        danger = glm.get("danger_flags") or []
+        danger_text = ", ".join(danger) if danger else "无"
+        lines = [
+            "当前由轻量级过滤模型（GLM）给出的市场环境标签：",
+            f"- 趋势一致性：{glm.get('trend_consistency')}",
+            f"- 波动状态：{glm.get('volatility_status')}",
+            f"- 结构位置：{glm.get('structure_relevance')}",
+            f"- 形态候选：{glm.get('pattern_candidate')}",
+            f"- 风险标记：{danger_text}",
+            "请信任以上标签，不要重复判断大环境；专注形态真假、是否值得交易、入场/止损/止盈/仓位设计。",
+        ]
+        if danger:
+            lines.append(
+                "若无持仓且存在高风险标记（atr_extreme/low_liquidity/wick_noise 等），应偏向观望；"
+                "复评场景应优先考虑减仓/移动止损/平仓，避免激进加仓。"
+            )
+        if review:
+            lines.append("本次为持仓复评，重点关注风险管理与止损/止盈调整。")
+        return "\n".join(lines)
 
     @staticmethod
     def _parse_json(content: str) -> Dict[str, Any]:
