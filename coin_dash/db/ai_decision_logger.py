@@ -22,12 +22,20 @@ class AIDecisionLogger:
         result: Dict[str, Any],
         tokens_used: Optional[int],
         latency_ms: Optional[float],
+        model_name: Optional[str] = None,
+        committee_id: Optional[str] = None,
+        weight: Optional[float] = None,
+        is_final: bool = False,
     ) -> None:
         if not self.client.enabled:
             return
         stmt = insert(AIDecisionLog).values(
             {
                 "run_id": self.run_id,
+                "committee_id": committee_id,
+                "model_name": model_name,
+                "weight": weight,
+                "is_final": is_final,
                 "decision_type": decision_type,
                 "symbol": symbol,
                 "payload": payload,

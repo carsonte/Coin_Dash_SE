@@ -31,3 +31,13 @@ export async function fetchEvents(params) {
   const { data } = await client.get("/api/system-events", { params });
   return data;
 }
+
+export async function fetchTrades(params) {
+  const { data } = await client.get("/api/trades", { params });
+  return data;
+}
+
+export async function fetchSignals(params) {
+  const { data } = await client.get("/api/signals", { params });
+  return data;
+}

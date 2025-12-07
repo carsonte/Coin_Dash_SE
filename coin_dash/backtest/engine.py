@@ -12,6 +12,8 @@ from ..data.pipeline import DataPipeline
 from ..features.multi_timeframe import compute_feature_context
 from ..features.trend import classify_trade_type
 from ..ai.filter_adapter import GlmFilterResult
+from ..ai.committee_engine import decide_with_committee_sync
+from ..ai.committee_schemas import CommitteeDecision
 from ..ai.mock_adapter import decide_mock
 from ..ai.deepseek_adapter import DeepSeekClient
 from ..ai.models import Decision
@@ -248,13 +250,79 @@ def _make_decision(
     }
     if glm_result:
         payload["glm_filter_result"] = glm_result.model_dump_safe()
+    committee_enabled = bool(getattr(cfg, "enable_multi_model_committee", False))
     if client is None or not client.enabled():
         return _hold("deepseek_disabled")
+
+    if committee_enabled:
+        try:
+            committee, primary_decision = decide_with_committee_sync(
+                symbol, payload, client, ai_logger=getattr(client, "ai_logger", None)
+            )
+            return _apply_committee_outcome(committee, primary_decision, feature_ctx)
+        except Exception:
+            return _hold("committee_failed")
+
     try:
         decision = client.decide_trade(symbol, payload, glm_result=glm_result)
         return decision
     except Exception:
         return _hold("deepseek_unavailable")
+
+
+def _apply_committee_outcome(committee: CommitteeDecision, primary: Optional[Decision], feature_ctx) -> Decision:
+    def _bias_of(decision: Decision) -> str:
+        if decision.decision == "open_long":
+            return "long"
+        if decision.decision == "open_short":
+            return "short"
+        return "no-trade"
+
+    # 没有 DeepSeek 主决策或委员会否决
+    if primary is None:
+        return Decision(
+            decision="hold",
+            entry_price=feature_ctx.features.get("price_30m", 0.0),
+            stop_loss=0.0,
+            take_profit=0.0,
+            risk_reward=0.0,
+            confidence=0.0,
+            reason=f"committee {committee.final_decision} score={committee.committee_score:.2f}",
+            meta={"committee": committee.model_dump()},
+            glm_snapshot=feature_ctx.features.get("glm_filter_result"),
+        )
+
+    primary.meta["committee"] = committee.model_dump()
+    committee_reason = f"committee {committee.final_decision} score={committee.committee_score:.2f}"
+    if committee.final_decision == "no-trade":
+        return Decision(
+            decision="hold",
+            entry_price=primary.entry_price,
+            stop_loss=primary.stop_loss,
+            take_profit=primary.take_profit,
+            risk_reward=0.0,
+            confidence=committee.final_confidence * 100,
+            reason=f"{primary.reason} | {committee_reason}",
+            meta=primary.meta,
+            glm_snapshot=primary.glm_snapshot,
+        )
+
+    if _bias_of(primary) != committee.final_decision:
+        return Decision(
+            decision="hold",
+            entry_price=primary.entry_price,
+            stop_loss=primary.stop_loss,
+            take_profit=primary.take_profit,
+            risk_reward=0.0,
+            confidence=committee.final_confidence * 100,
+            reason=f"committee override -> {committee.final_decision}, veto primary",
+            meta=primary.meta,
+            glm_snapshot=primary.glm_snapshot,
+        )
+
+    primary.reason = f"{primary.reason} | {committee_reason}"
+    primary.confidence = max(primary.confidence, committee.final_confidence * 100)
+    return primary
 
 
 def _risk_quality_hint(feature_ctx) -> Dict[str, float]:

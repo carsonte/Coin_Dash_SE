@@ -73,6 +73,8 @@ def list_decisions(
     end: Optional[str] = Query(None),
     symbol: Optional[str] = None,
     run_id: Optional[str] = None,
+    committee_id: Optional[str] = None,
+    model_name: Optional[str] = None,
     decision_type: Optional[str] = None,
     keyword: Optional[str] = None,
     limit: int = Query(50, ge=1, le=500),
@@ -86,6 +88,10 @@ def list_decisions(
         q = q.filter(AIDecisionLog.symbol == symbol)
     if run_id:
         q = q.filter(AIDecisionLog.run_id == run_id)
+    if committee_id:
+        q = q.filter(AIDecisionLog.committee_id == committee_id)
+    if model_name:
+        q = q.filter(AIDecisionLog.model_name == model_name)
     if decision_type:
         q = q.filter(AIDecisionLog.decision_type == decision_type)
     if keyword:
@@ -97,6 +103,10 @@ def list_decisions(
         .with_entities(
             AIDecisionLog.id,
             AIDecisionLog.run_id,
+            AIDecisionLog.committee_id,
+            AIDecisionLog.model_name,
+            AIDecisionLog.is_final,
+            AIDecisionLog.weight,
             AIDecisionLog.symbol,
             AIDecisionLog.decision_type,
             AIDecisionLog.confidence,
@@ -119,6 +129,10 @@ def list_decisions(
             {
                 "id": row.id,
                 "run_id": row.run_id,
+                "committee_id": row.committee_id,
+                "model_name": row.model_name,
+                "is_final": row.is_final,
+                "weight": row.weight,
                 "symbol": row.symbol,
                 "decision_type": row.decision_type,
                 "confidence": row.confidence,

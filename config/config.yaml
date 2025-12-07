@@ -6,6 +6,8 @@ symbols:
   - ETHUSDm
   - XAUUSDm
 
+enable_multi_model_committee: true
+
 live:
   symbols:
     - BTCUSDm
@@ -143,3 +145,7 @@ notifications:
 
 log:
   level: DEBUG                # 日志级别
+
+# LLM 客户端环境变量提示（不在此文件中配置）：
+# - GLM_API_KEY / GLM_API_BASE（默认 https://open.bigmodel.cn/api/paas/v4/chat/completions）
+# - AIZEX_API_KEY / AIZEX_API_BASE（OpenAI 兼容，gpt-4o-mini）

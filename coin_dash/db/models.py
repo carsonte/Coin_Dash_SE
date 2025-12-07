@@ -111,6 +111,10 @@ class AIDecisionLog(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
+    committee_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
+    model_name: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    weight: Mapped[float | None] = mapped_column(Float, nullable=True)
+    is_final: Mapped[bool] = mapped_column(default=False)
     decision_type: Mapped[str] = mapped_column(String(20))
     symbol: Mapped[str] = mapped_column(String(20))
     payload: Mapped[dict] = mapped_column(JSON)

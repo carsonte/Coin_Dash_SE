@@ -98,6 +98,7 @@ class DeepSeekClient:
                 data,
                 tokens_used,
                 latency_ms,
+                model_name="deepseek",
             )
         decision = Decision(
             decision=data.get("decision", "hold"),
@@ -145,7 +146,7 @@ class DeepSeekClient:
             f"review_action={data.get('action')} sl={data.get('new_stop_loss')} tp={data.get('new_take_profit')} rr={data.get('new_rr')} reason={data.get('reason')}",
         )
         if self.ai_logger:
-            self.ai_logger.log_decision("review", symbol, payload, data, tokens_used, latency_ms)
+            self.ai_logger.log_decision("review", symbol, payload, data, tokens_used, latency_ms, model_name="deepseek")
         if data.get("context_summary"):
             self.conversation.append(position_id, symbol, "assistant", data["context_summary"])
         return ReviewDecision(

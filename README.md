@@ -7,8 +7,11 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
 
 近期更新
 --------
+- **多模型委员会**：新增 `enable_multi_model_committee`（默认开启），DeepSeek + GPT-4o-mini(Aizex) + GLM-4.5V 权重 0.5/0.3/0.2 投票，冲突自动降级为观望，主决策附带委员会评分/冲突等级。
+- **LLM 客户端**：新增 Aizex `gpt-4o-mini`、官方 `glm-4.5v` 客户端；`.env` 增加 `AIZEX_API_KEY`/`AIZEX_API_BASE`、`GLM_API_KEY`/`GLM_API_BASE`，提供 `scripts/smoke_llm_clients.py` 冒烟脚本。
+- **决策持久化/接口**：`ai_decisions` 增加 `model_name`/`committee_id`/`weight`/`is_final`，三模型+委员会各一条记录；API `/api/decisions` 支持按 `committee_id`/`model_name` 过滤并返回新字段（向后兼容）。
 - **决策 Prompt 更新**：突破第一根不追、第二根确认可入场；区间上沿空/下沿多（小风险结构单）；1h 定主方向、30m 执行、4h 仅作风险过滤；高噪声下若 ATR 扩张/布林张口/EMA 扩散触发需给出可执行方案，避免过度 HOLD；弱趋势/盘整且出现微结构突破（2-3 根连续推动、EMA20 轻微发散等）时须给出“小仓/低 RR 可执行方案”（允许 RR=1.0~1.5），不得因噪声略高直接全局观望。
-- **MT5 实时行情**：新增 `mt5_api` 数据源（默认启用），从 Exness-MT5 API 拉取 `/ohlc`、`/price`；tick_volume → volume，秒级时间戳升序。`data.provider` 可切换回 `ccxt`。
+- **MT5 实时行情**：新增 `mt5_api` 数据源（默认启用），从 MT5 API 拉取 `/ohlc`、`/price`；tick_volume → volume，秒级时间戳升序。`data.provider` 可切换回 `ccxt`。
 - **符号切换**：默认符号改为 MT5 合约 `BTCUSDm`、`ETHUSDm`，并新增黄金 `XAUUSDm`（可在 `config.live.symbols` 直接跑多品种），live/backtest 示例命令同步更新。
 - **成交价来源**：PaperBroker 开仓价使用最新 bid/ask（多头用 ask，空头用 bid），确保模拟成交贴合盘口。
 - **GLM 预过滤升级**：预过滤输出结构化 `GlmFilterResult`（趋势一致性/波动/结构位置/形态候选/危险标签），按“市场状态过滤器 + 成本守门人”规则挡掉趋势冲突、ATR 极端、结构中轴/缺失、无形态候选、whipsaw/流动性差；`glm_filter.on_error` 可选 `call_deepseek/hold` 兜底，标签透传给 DeepSeek 提升决策上下文。

@@ -147,6 +147,7 @@ class EventTriggersCfg(BaseModel):
 
 
 class AppConfig(BaseModel):
+    enable_multi_model_committee: bool = True
     symbols: List[str] = Field(default_factory=lambda: ["BTCUSDm", "ETHUSDm", "XAUUSDm"])
     timeframes: TimeframeCfg = Field(default_factory=TimeframeCfg)
     market_filter: MarketFilterCfg = Field(default_factory=MarketFilterCfg)

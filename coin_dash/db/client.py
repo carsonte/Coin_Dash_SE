@@ -38,7 +38,7 @@ class DatabaseClient:
         self._session_factory = scoped_session(factory)
         if self.cfg.auto_migrate:
             Base.metadata.create_all(self.engine)
-            self._ensure_run_id_columns()
+            self._ensure_columns()
             logger.info("Database schema ensured via auto_migrate.")
 
     @contextmanager
@@ -60,31 +60,38 @@ class DatabaseClient:
         if self.engine is not None:
             self.engine.dispose()
 
-    def _ensure_run_id_columns(self) -> None:
-        """Minimal, idempotent column patch for run_id on key tables."""
+    def _ensure_columns(self) -> None:
+        """Minimal, idempotent column patch for run_id 等关键字段."""
         if self.engine is None:
             return
         inspector = inspect(self.engine)
         targets = {
-            "ai_decisions": "run_id",
-            "signals": "run_id",
-            "trades": "run_id",
-            "system_events": "run_id",
+            "ai_decisions": {
+                "run_id": "VARCHAR(64)",
+                "committee_id": "VARCHAR(64)",
+                "model_name": "VARCHAR(32)",
+                "weight": "FLOAT",
+                "is_final": "BOOLEAN",
+            },
+            "signals": {"run_id": "VARCHAR(64)"},
+            "trades": {"run_id": "VARCHAR(64)"},
+            "system_events": {"run_id": "VARCHAR(64)"},
         }
         with self.engine.connect() as conn:
-            for table, col_name in targets.items():
+            for table, cols in targets.items():
                 try:
-                    cols = [col["name"] for col in inspector.get_columns(table)]
+                    existing = [col["name"] for col in inspector.get_columns(table)]
                 except Exception:
                     continue
-                if col_name in cols:
-                    continue
-                try:
-                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col_name} VARCHAR(64)"))
-                    conn.commit()
-                    logger.info("Added column %s to table %s", col_name, table)
-                except Exception as exc:
-                    logger.warning("Failed to add column %s to %s: %s", col_name, table, exc)
+                for col_name, col_type in cols.items():
+                    if col_name in existing:
+                        continue
+                    try:
+                        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}"))
+                        conn.commit()
+                        logger.info("Added column %s to table %s", col_name, table)
+                    except Exception as exc:
+                        logger.warning("Failed to add column %s to %s: %s", col_name, table, exc)
 
     def _prepare_sqlite_url(self, url: URL) -> URL:
         db_path = url.database or ""
