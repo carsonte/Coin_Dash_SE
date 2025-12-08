@@ -9,6 +9,7 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
 --------
 - **B1 前置委员会（默认开启）**：`enable_multi_model_committee` 现在表示轻量双模型前置门卫（gpt-4o-mini 0.6 + glm-4.5v 0.4），只决定“要不要叫 DeepSeek”。冲突或置信度 < 0.55 一律 `no-trade`，通过则写入 `committee_front`/`committee_id` 元信息后再让 DeepSeek 生成执行方案。
 - **前置否决理由更清晰**：当 B1 拦截时，返回观望并在 reason 中写明两模型的结论与置信度（例：`前置委员会否决: no-trade conf=0.52 gpt-4o-mini:no-trade;glm-4.5v:no-trade`），卡片/日志能直接看到未调用 DeepSeek 的原因。
+- **前置模型容错**：每个模型调用失败会重试 3 次，仍失败则记为弃权；仅一票成功时采用该票结论；两票都失败时用 `glm_filter_result` 临时投票决定是否放行 DeepSeek，尽量避免因模型不可用而卡死。
 - **LLM 客户端**：新增 Aizex `gpt-4o-mini`、官方 `glm-4.5v` 客户端；`.env` 增加 `AIZEX_API_KEY`/`AIZEX_API_BASE`、`GLM_API_KEY`/`GLM_API_BASE`，提供 `scripts/smoke_llm_clients.py` 冒烟脚本。
 - **决策持久化/接口**：`ai_decisions` 记录 `model_name`/`committee_id`/`weight`/`is_final`，前置委员会会落一条 `committee_front` 总结，成员各一条；API `/api/decisions` 支持按 `committee_id`/`model_name` 过滤并返回新字段（向后兼容）。
 - **DeepSeek 提示词（执行官模式）**：角色简化为“执行交易员”，信任 GLM 预过滤 + 前置委员会共识，不再反复判断大环境；只输出 JSON 方案（方向/入场/止损/止盈/仓位/风险评分），允许在结构一般时给出轻仓试探而不是过度观望。
