@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, List
 from uuid import uuid4
 
 from .committee_aggregator import WEIGHTS, aggregate_committee
@@ -128,17 +128,33 @@ async def decide_front_gate(
     members: Dict[str, ModelDecision] = {}
     committee_id = uuid4().hex
 
+    async def _retry_call(fn, name: str) -> ModelDecision:
+        attempts = 3
+        last_exc: Exception | None = None
+        for _ in range(attempts):
+            try:
+                return await fn()
+            except (LLMClientError, Exception) as exc:  # noqa: BLE001
+                last_exc = exc
+        LOGGER.warning("front_gate %s failed after retries: %s", name, last_exc)
+        return ModelDecision(
+            model_name=name,
+            bias="abstain",
+            confidence=0.0,
+            raw_response={"error": f"{name}_failed", "detail": str(last_exc) if last_exc else "unknown"},
+        )
+
     # GPT-4o-mini
     try:
         if overrides and "gpt-4o-mini" in overrides:
             members["gpt-4o-mini"] = overrides["gpt-4o-mini"]
         else:
-            members["gpt-4o-mini"] = await _call_gpt4omini(symbol, payload)
+            members["gpt-4o-mini"] = await _retry_call(lambda: _call_gpt4omini(symbol, payload), "gpt-4o-mini")
     except (LLMClientError, Exception) as exc:  # noqa: BLE001
         LOGGER.warning("front_gate gpt-4o-mini failed: %s", exc)
         members["gpt-4o-mini"] = ModelDecision(
             model_name="gpt-4o-mini",
-            bias="no-trade",
+            bias="abstain",
             confidence=0.0,
             raw_response={"error": str(exc)},
         )
@@ -148,12 +164,12 @@ async def decide_front_gate(
         if overrides and "glm-4.5v" in overrides:
             members["glm-4.5v"] = overrides["glm-4.5v"]
         else:
-            members["glm-4.5v"] = await _call_glm45v(symbol, payload)
+            members["glm-4.5v"] = await _retry_call(lambda: _call_glm45v(symbol, payload), "glm-4.5v")
     except (LLMClientError, Exception) as exc:  # noqa: BLE001
         LOGGER.warning("front_gate glm-4.5v failed: %s", exc)
         members["glm-4.5v"] = ModelDecision(
             model_name="glm-4.5v",
-            bias="no-trade",
+            bias="abstain",
             confidence=0.0,
             raw_response={"error": str(exc)},
         )
@@ -161,38 +177,69 @@ async def decide_front_gate(
     m1 = members["gpt-4o-mini"]
     m2 = members["glm-4.5v"]
 
+    def _glm_fallback(payload: Dict[str, Any]) -> ModelDecision | None:
+        glm_snapshot = payload.get("glm_filter_result") or {}
+        should_call = bool(glm_snapshot.get("should_call_deepseek", False))
+        # glm_filter 只有“是否值得调用 DeepSeek”，没有方向，用 long 作为“放行”的占位
+        bias = "long" if should_call else "no-trade"
+        conf = float(glm_snapshot.get("confidence") or 0.6 if should_call else 0.0)
+        return ModelDecision(
+            model_name="glm-filter-fallback",
+            bias=bias,
+            confidence=max(0.0, min(1.0, conf)),
+            raw_response=glm_snapshot,
+            meta={"source": "glm_filter_fallback"},
+        )
+
+    available: List[ModelDecision] = [md for md in (m1, m2) if md.bias != "abstain"]
+    fallback_used = False
+    if not available:
+        fb = _glm_fallback(payload)
+        if fb:
+            available.append(fb)
+            members["glm-filter-fallback"] = fb
+            fallback_used = True
+
     final_decision = "no-trade"
     committee_score = 0.0
     final_confidence = 0.0
-    conflict_level = "high" if m1.bias != m2.bias else "low"
+    conflict_level = "high"
 
-    if m1.bias == m2.bias:
+    if len(available) == 1:
+        md = available[0]
+        final_decision = md.bias
+        final_confidence = md.confidence
+        committee_score = md.confidence * (1 if md.bias == "long" else -1 if md.bias == "short" else 0)
         conflict_level = "low"
-        if m1.bias == "no-trade":
-            final_decision = "no-trade"
-        else:
-            conf = min(m1.confidence, m2.confidence)
-            if conf < 0.55:
+    elif len(available) >= 2:
+        a1, a2 = available[0], available[1]
+        if a1.bias == a2.bias:
+            conflict_level = "low"
+            if a1.bias == "no-trade":
                 final_decision = "no-trade"
-                final_confidence = conf
-                committee_score = 0.0
-                conflict_level = "medium"
             else:
-                final_decision = m1.bias
-                final_confidence = conf
-                committee_score = conf * (1 if final_decision == "long" else -1)
-    else:
-        final_decision = "no-trade"
-        committee_score = 0.0
-        final_confidence = 0.0
-        conflict_level = "high"
+                conf = min(a1.confidence, a2.confidence)
+                if conf < 0.55:
+                    final_decision = "no-trade"
+                    final_confidence = conf
+                    committee_score = 0.0
+                    conflict_level = "medium"
+                else:
+                    final_decision = a1.bias
+                    final_confidence = conf
+                    committee_score = conf * (1 if final_decision == "long" else -1)
+        else:
+            final_decision = "no-trade"
+            committee_score = 0.0
+            final_confidence = 0.0
+            conflict_level = "high"
 
     committee = CommitteeDecision(
         final_decision=final_decision,
         final_confidence=final_confidence,
         committee_score=committee_score,
         conflict_level=conflict_level,
-        members=[m1, m2],
+        members=list(members.values()),
     )
 
     def _log(md: ModelDecision, is_final: bool = False, extra: Optional[Dict[str, Any]] = None) -> None:
