@@ -175,7 +175,8 @@ function LogsFilterForm({ value, onChange, symbolOptions, runIdOptions }) {
 
 function StatsCards({ decisions }) {
   const total = decisions.total || 0;
-  const getDecision = (d) => (d.result?.decision || d.decision_type || "").toString().toLowerCase();
+  const getDecision = (d) =>
+    (d.decision_code || d.result?.decision || d.decision_type || "").toString().toLowerCase();
   const finalOpen = (decisions.items || []).filter((d) => d.is_final && getDecision(d).startsWith("open")).length;
   const holdCount = (decisions.items || []).filter((d) => getDecision(d) === "hold").length;
 
@@ -305,6 +306,30 @@ function DecisionsTab({ filters, onDataChange }) {
   const [detail, setDetail] = useState(null);
   const [committeeRecords, setCommitteeRecords] = useState([]);
   const [loadingCommittee, setLoadingCommittee] = useState(false);
+  const [detailCache, setDetailCache] = useState({});
+
+  const decisionLabel = (code) => {
+    const map = {
+      open_long: "开多",
+      open_short: "开空",
+      close: "平仓",
+      hold: "观望",
+      review: "复评",
+      decision: "决策",
+    };
+    if (!code) return "-";
+    const key = code.toString().toLowerCase();
+    return map[key] || key;
+  };
+
+  const pickDecisionCode = (record, detailsMap) => {
+    const detailItem = detailsMap?.[record.id];
+    return (
+      (detailItem?.result?.decision || detailItem?.decision_type || record.result?.decision || record.decision_type || "")
+        .toString()
+        .toLowerCase()
+    );
+  };
 
   const load = async (pg = page, nextFilters = filters) => {
     if (!nextFilters.start || !nextFilters.end) return;
@@ -322,8 +347,29 @@ function DecisionsTab({ filters, onDataChange }) {
         limit: pg.pageSize,
         offset: (pg.current - 1) * pg.pageSize,
       });
-      setData({ items: res.items || [], total: res.total || 0 });
-      onDataChange?.({ items: res.items || [], total: res.total || 0 });
+      const baseItems = res.items || [];
+      // 拉取详情以获得真实的 decision 字段
+      const cached = { ...detailCache };
+      const details = await Promise.all(
+        baseItems.map(async (item) => {
+          if (cached[item.id]) return cached[item.id];
+          try {
+            const d = await fetchDecisionDetail(item.id);
+            cached[item.id] = d;
+            return d;
+          } catch (e) {
+            return null;
+          }
+        })
+      );
+      const enriched = baseItems.map((item, idx) => {
+        const detailItem = details[idx] || cached[item.id];
+        const code = pickDecisionCode(item, cached);
+        return { ...item, decision_code: code, _detail: detailItem };
+      });
+      setDetailCache(cached);
+      setData({ items: enriched, total: res.total || 0 });
+      onDataChange?.({ items: enriched, total: res.total || 0 });
     } catch (err) {
       message.error(`决策列表获取失败: ${err}`);
     } finally {
@@ -361,19 +407,6 @@ function DecisionsTab({ filters, onDataChange }) {
     }
   };
 
-  const renderDecisionText = (record) => {
-    const code = (record.result?.decision || record.decision_type || "").toString().toLowerCase();
-    const map = {
-      open_long: "开多",
-      open_short: "开空",
-      close: "平仓",
-      hold: "观望",
-      review: "复评",
-      decision: "决策",
-    };
-    return map[code] || code || "-";
-  };
-
   const columns = useMemo(
     () => [
       { title: "时间", dataIndex: "created_at", width: 160, ellipsis: true, align: "center" },
@@ -384,7 +417,7 @@ function DecisionsTab({ filters, onDataChange }) {
         width: 120,
         ellipsis: true,
         align: "center",
-        render: (_, record) => renderDecisionText(record),
+        render: (_, record) => decisionLabel(record.decision_code || record.decision_type),
       },
       {
         title: "model_name",
