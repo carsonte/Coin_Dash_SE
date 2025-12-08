@@ -175,10 +175,9 @@ function LogsFilterForm({ value, onChange, symbolOptions, runIdOptions }) {
 
 function StatsCards({ decisions }) {
   const total = decisions.total || 0;
-  const finalOpen = (decisions.items || []).filter(
-    (d) => d.is_final && (d.decision_type || "").startsWith("open")
-  ).length;
-  const holdCount = (decisions.items || []).filter((d) => d.decision_type === "hold").length;
+  const getDecision = (d) => (d.result?.decision || d.decision_type || "").toString().toLowerCase();
+  const finalOpen = (decisions.items || []).filter((d) => d.is_final && getDecision(d).startsWith("open")).length;
+  const holdCount = (decisions.items || []).filter((d) => getDecision(d) === "hold").length;
 
   const data = [
     { title: "决策总数", value: total },
@@ -362,11 +361,31 @@ function DecisionsTab({ filters, onDataChange }) {
     }
   };
 
+  const renderDecisionText = (record) => {
+    const code = (record.result?.decision || record.decision_type || "").toString().toLowerCase();
+    const map = {
+      open_long: "开多",
+      open_short: "开空",
+      close: "平仓",
+      hold: "观望",
+      review: "复评",
+      decision: "决策",
+    };
+    return map[code] || code || "-";
+  };
+
   const columns = useMemo(
     () => [
       { title: "时间", dataIndex: "created_at", width: 160, ellipsis: true, align: "center" },
       { title: "symbol", dataIndex: "symbol", width: 100, ellipsis: true, align: "center" },
-      { title: "决策类型", dataIndex: "decision_type", width: 120, ellipsis: true, align: "center" },
+      {
+        title: "决策类型",
+        dataIndex: "decision_type",
+        width: 120,
+        ellipsis: true,
+        align: "center",
+        render: (_, record) => renderDecisionText(record),
+      },
       {
         title: "model_name",
         dataIndex: "model_name",
