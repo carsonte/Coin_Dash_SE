@@ -7,10 +7,10 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
 
 近期更新
 --------
-- **多模型委员会**：新增 `enable_multi_model_committee`（默认开启），DeepSeek + GPT-4o-mini(Aizex) + GLM-4.5V 权重 0.5/0.3/0.2 投票，冲突自动降级为观望，主决策附带委员会评分/冲突等级。
+- **B1 前置委员会（默认开启）**：`enable_multi_model_committee` 现在表示轻量双模型前置门卫（gpt-4o-mini 0.6 + glm-4.5v 0.4），只决定“要不要叫 DeepSeek”。冲突或置信度 < 0.55 一律 `no-trade`，通过则写入 `committee_front`/`committee_id` 元信息后再让 DeepSeek 生成执行方案。
 - **LLM 客户端**：新增 Aizex `gpt-4o-mini`、官方 `glm-4.5v` 客户端；`.env` 增加 `AIZEX_API_KEY`/`AIZEX_API_BASE`、`GLM_API_KEY`/`GLM_API_BASE`，提供 `scripts/smoke_llm_clients.py` 冒烟脚本。
-- **决策持久化/接口**：`ai_decisions` 增加 `model_name`/`committee_id`/`weight`/`is_final`，三模型+委员会各一条记录；API `/api/decisions` 支持按 `committee_id`/`model_name` 过滤并返回新字段（向后兼容）。
-- **决策 Prompt 更新**：突破第一根不追、第二根确认可入场；区间上沿空/下沿多（小风险结构单）；1h 定主方向、30m 执行、4h 仅作风险过滤；高噪声下若 ATR 扩张/布林张口/EMA 扩散触发需给出可执行方案，避免过度 HOLD；弱趋势/盘整且出现微结构突破（2-3 根连续推动、EMA20 轻微发散等）时须给出“小仓/低 RR 可执行方案”（允许 RR=1.0~1.5），不得因噪声略高直接全局观望。
+- **决策持久化/接口**：`ai_decisions` 记录 `model_name`/`committee_id`/`weight`/`is_final`，前置委员会会落一条 `committee_front` 总结，成员各一条；API `/api/decisions` 支持按 `committee_id`/`model_name` 过滤并返回新字段（向后兼容）。
+- **DeepSeek 提示词（执行官模式）**：角色简化为“执行交易员”，信任 GLM 预过滤 + 前置委员会共识，不再反复判断大环境；只输出 JSON 方案（方向/入场/止损/止盈/仓位/风险评分），允许在结构一般时给出轻仓试探而不是过度观望。
 - **MT5 实时行情**：新增 `mt5_api` 数据源（默认启用），从 MT5 API 拉取 `/ohlc`、`/price`；tick_volume → volume，秒级时间戳升序。`data.provider` 可切换回 `ccxt`。
 - **符号切换**：默认符号改为 MT5 合约 `BTCUSDm`、`ETHUSDm`，并新增黄金 `XAUUSDm`（可在 `config.live.symbols` 直接跑多品种），live/backtest 示例命令同步更新。
 - **成交价来源**：PaperBroker 开仓价使用最新 bid/ask（多头用 ask，空头用 bid），确保模拟成交贴合盘口。
@@ -33,11 +33,12 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
 ------------------------
 1. 数据管线：`data/pipeline.py` 重采样 30m/1h/4h/1d，生成对齐窗口。
 2. 特征与结构：`features/multi_timeframe.py` 产出指标/确认提示；`features/structure.py` 识别支撑/阻力；`features/market_mode.py` 检测市场模式；`features/trend.py` 计算趋势评分。
-3. 预过滤：`ai/filter_adapter.py` 调用 GLM-4.5-Flash 判定是否需要 DeepSeek（失败自动放行）。
-4. Prompt 调用：`ai/deepseek_adapter.py` 组织上下文，向 DeepSeek 请求决策或复评。
-5. 兜底与校验：`ai/safe_fallback.py` 检查价格顺序/RR，`verify/validator.py` 做基本合法性校验。
-6. 执行与同步：`runtime/orchestrator.py` 写入 `StateManager`，推送飞书卡，记录共享记忆，同步纸盘并执行冷却。
-7. 回测：`backtest/engine.py` 复用同一决策链，`exec/paper.py` 撮合并统计绩效。
+3. 预过滤：`ai/filter_adapter.py` 调用 GLM-4.5-Flash 判定是否需要 DeepSeek（失败自动放行；should_call_deepseek=False 直接跳过当次决策）。
+4. 前置双模型委员会（B1）：`ai/committee_engine.py` 用 gpt-4o-mini + glm-4.5v 做“要不要叫 DeepSeek”的前置投票，冲突/低置信度直接 `no-trade`；通过时写入 `committee_front`/`committee_id` 供后续参考。
+5. DeepSeek 执行官：`ai/deepseek_adapter.py` 组织上下文（含 GLM/committee_front），向 DeepSeek 请求执行方案 JSON，不再与其它模型投票。
+6. 兜底与校验：`ai/safe_fallback.py` 检查价格顺序/RR，`verify/validator.py` 做基本合法性校验。
+7. 执行与同步：`runtime/orchestrator.py` 写入 `StateManager`，推送飞书卡，记录共享记忆，同步纸盘并执行冷却。
+8. 回测：`backtest/engine.py` 复用同一决策链（GLM 预过滤 + B1 前置门卫 + DeepSeek 执行官），`exec/paper.py` 撮合并统计绩效。
 
 运行方式
 --------
@@ -68,6 +69,7 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
 - **通知**：`notifications` 中配置飞书 webhook 和签名秘钥。  
 - **数据库**：`database` 可开启/关闭 SQLite 或其它 DSN。  
 - **预过滤 + DeepSeek 集成**：命中强触发直接进入 DeepSeek；GLM-4.5-Flash 返回结构化 `GlmFilterResult`（trend_consistency、volatility_status、structure_relevance、pattern_candidate、danger_flags、should_call_deepseek）；挡掉趋势冲突/ATR 极端/结构中轴或缺失/无形态候选/whipsaw/低流动性等。`glm_filter.on_error` 控制失败兜底（call_deepseek/hold）。标签会被透传到 DeepSeek Prompt 的“GLM Market Filter”段，指示大环境无需重复判断、专注形态真假与入场/风控设计；危险标签（atr_extreme/low_liquidity/wick_noise 等）会提醒无持仓偏观望、复评优先控仓。观望卡会标注“GLM 预过滤（未调用 DeepSeek）”。  
+- **前置委员会 B1**：`enable_multi_model_committee` 控制 gpt-4o-mini + glm-4.5v 前置门卫；冲突或置信度不足直接不叫 DeepSeek，通过时会把 `committee_front`/`committee_id` 写入决策元信息。  
 - **MT5 实时数据源**：`data.provider=mt5_api` 时，行情来自 MT5 API（`/price`、`/ohlc`），tick_volume → volume；K 线按秒级时间戳升序写入 pipeline/特征；PaperBroker 开仓价取最新 bid/ask（多头用 ask，空头用 bid），不再依赖 CCXT。
 - **本地事件触发层**：`event_triggers.enabled=true` 时，仅在检测到本地波动/均线翻转/结构突破等事件后才进入 GLM / DeepSeek；默认 false 保持现有流程，便于在盘整期节约模型调用。
 - **GLM 机会初筛器**：`glm_filter.enabled=true` 时，在调用 DeepSeek 前使用 GLM 快速判定是否值得继续；包含重试/超时/解析兜底，失败会放行 DeepSeek。
