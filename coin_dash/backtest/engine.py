@@ -289,6 +289,21 @@ def _make_decision(
         return _hold("deepseek_disabled")
 
     committee: CommitteeDecision | None = None
+    def _committee_hold_reason(decision: CommitteeDecision | None) -> str:
+        if decision is None:
+            return "前置委员会异常，未调用 DeepSeek"
+        members = []
+        for m in decision.members:
+            try:
+                members.append(f"{m.model_name}:{m.bias}(c={m.confidence:.2f})")
+            except Exception:
+                members.append(f"{getattr(m, 'model_name', '?')}:{getattr(m, 'bias', '?')}")
+        members_txt = ";".join(members)
+        return (
+            f"前置委员会否决: {decision.final_decision} "
+            f"conf={decision.final_confidence:.2f} {members_txt}"
+        )
+
     if committee_enabled:
         try:
             committee = decide_front_gate_sync(
@@ -300,10 +315,8 @@ def _make_decision(
             return _hold("front_committee_failed")
 
         if committee is None or committee.final_decision == "no-trade" or committee.final_confidence < 0.55:
-            result = _hold(
-                f"front_committee_hold bias={committee.final_decision if committee else 'unknown'} "
-                f"score={committee.committee_score if committee else 0:.2f}"
-            )
+            reason_msg = _committee_hold_reason(committee)
+            result = _hold(reason_msg)
             if committee is not None:
                 result.meta["committee_front"] = committee.model_dump()
                 result.meta["adapter"] = "front_committee"
