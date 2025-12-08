@@ -124,6 +124,7 @@ function RecentDecisions({ items }) {
     <Card title="最近 AI 决策">
       <List
         dataSource={items}
+        style={{ maxHeight: 400, overflow: "auto" }}
         renderItem={(item) => (
           <List.Item key={item.id}>
             <List.Item.Meta
@@ -152,6 +153,7 @@ function RecentEvents({ items }) {
     <Card title="最近系统事件">
       <List
         dataSource={items}
+        style={{ maxHeight: 400, overflow: "auto" }}
         renderItem={(item) => (
           <List.Item key={item.id}>
             <List.Item.Meta
