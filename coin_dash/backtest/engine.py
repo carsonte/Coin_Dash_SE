@@ -11,8 +11,8 @@ from ..config import AppConfig
 from ..data.pipeline import DataPipeline
 from ..features.multi_timeframe import compute_feature_context
 from ..features.trend import classify_trade_type
-from ..ai.filter_adapter import GlmFilterResult
-from ..ai.committee_engine import decide_with_committee_sync
+from ..ai.filter_adapter import GlmFilterResult, PreFilterClient
+from ..ai.committee_engine import decide_front_gate_sync
 from ..ai.committee_schemas import CommitteeDecision
 from ..ai.mock_adapter import decide_mock
 from ..ai.deepseek_adapter import DeepSeekClient
@@ -54,6 +54,8 @@ def run_backtest(
     tracker = PerformanceTracker()
     decision_logger = db_services.ai_logger if (db_services and db_services.ai_logger) else None
     deepseek_client = DeepSeekClient(cfg.deepseek, glm_cfg=cfg.glm_filter, decision_logger=decision_logger) if use_deepseek else None
+    glm_filter_enabled = bool(getattr(cfg, "glm_filter", None) and cfg.glm_filter.enabled)
+    glm_prefilter = PreFilterClient(cfg.glm_filter) if glm_filter_enabled else None
     safe_mode_cfg = cfg.performance.safe_mode or {}
     safe_mode_threshold = safe_mode_cfg.get("consecutive_stop_losses", 0)
     safe_mode = DailySafeMode(safe_mode_threshold)
@@ -88,7 +90,39 @@ def run_backtest(
 
         now_dt = datetime.fromtimestamp(ts.timestamp(), timezone.utc)
         feature_ctx = compute_feature_context(multi.frames)
-        decision = _make_decision(cfg, deepseek_client, symbol, feature_ctx)
+        glm_result: GlmFilterResult | None = None
+        if glm_filter_enabled and glm_prefilter is not None:
+            glm_context = {
+                "features": feature_ctx.features,
+                "market_mode": getattr(feature_ctx.market_mode, "name", None),
+                "mode_confidence": getattr(feature_ctx.market_mode, "confidence", None),
+                "trend": {
+                    "score": feature_ctx.trend.score,
+                    "grade": feature_ctx.trend.grade,
+                    "global_direction": feature_ctx.trend.global_direction,
+                },
+                "structure": {
+                    name: {"support": lvl.support, "resistance": lvl.resistance}
+                    for name, lvl in feature_ctx.structure.levels.items()
+                },
+                "recent_ohlc": feature_ctx.recent_ohlc,
+                "environment": feature_ctx.environment,
+                "global_temperature": feature_ctx.global_temperature,
+            }
+            try:
+                glm_result = glm_prefilter.should_call_deepseek(glm_context)
+            except Exception as exc:  # noqa: BLE001
+                glm_result = GlmFilterResult(
+                    should_call_deepseek=cfg.glm_filter.on_error == "call_deepseek",
+                    reason=f"prefilter_exception:{exc}",
+                    danger_flags=["glm_error"],
+                    failed_conditions=["glm_error"],
+                )
+            if glm_result and not glm_result.should_call_deepseek:
+                logs.append(f"{ts} glm_screen_hold symbol={symbol} reason={glm_result.reason}")
+                continue
+
+        decision = _make_decision(cfg, deepseek_client, symbol, feature_ctx, glm_result)
         decision = apply_fallback(decision, payload=getattr(decision, "meta", {}))
         if decision.decision == "hold":
             logs.append(f"{ts} hold reason={decision.reason}")
@@ -254,20 +288,42 @@ def _make_decision(
     if client is None or not client.enabled():
         return _hold("deepseek_disabled")
 
+    committee: CommitteeDecision | None = None
     if committee_enabled:
         try:
-            committee, primary_decision = decide_with_committee_sync(
-                symbol, payload, client, ai_logger=getattr(client, "ai_logger", None)
+            committee = decide_front_gate_sync(
+                symbol,
+                payload,
+                ai_logger=getattr(client, "ai_logger", None),
             )
-            return _apply_committee_outcome(committee, primary_decision, feature_ctx)
         except Exception:
-            return _hold("committee_failed")
+            return _hold("front_committee_failed")
+
+        if committee is None or committee.final_decision == "no-trade" or committee.final_confidence < 0.55:
+            result = _hold(
+                f"front_committee_hold bias={committee.final_decision if committee else 'unknown'} "
+                f"score={committee.committee_score if committee else 0:.2f}"
+            )
+            if committee is not None:
+                result.meta["committee_front"] = committee.model_dump()
+                result.meta["adapter"] = "front_committee"
+            if glm_result is not None:
+                result.glm_snapshot = glm_result.model_dump_safe()
+            return result
+
+        payload["committee_front"] = committee.model_dump()
 
     try:
         decision = client.decide_trade(symbol, payload, glm_result=glm_result)
-        return decision
     except Exception:
         return _hold("deepseek_unavailable")
+
+    if committee_enabled and committee is not None:
+        decision.meta = decision.meta or {}
+        decision.meta["committee_front"] = committee.model_dump()
+        if glm_result is not None:
+            decision.glm_snapshot = glm_result.model_dump_safe()
+    return decision
 
 
 def _apply_committee_outcome(committee: CommitteeDecision, primary: Optional[Decision], feature_ctx) -> Decision:

@@ -115,6 +115,131 @@ def _decision_to_member(decision: Decision, model_name: str = "deepseek") -> Mod
     )
 
 
+FRONT_WEIGHTS: Dict[str, float] = {"gpt-4o-mini": 0.6, "glm-4.5v": 0.4}
+
+
+async def decide_front_gate(
+    symbol: str,
+    payload: Dict[str, Any],
+    ai_logger: Optional[AIDecisionLogger] = None,
+    overrides: Optional[Dict[str, ModelDecision]] = None,
+) -> CommitteeDecision:
+    """前置双模型委员会（gpt-4o-mini + glm-4.5v），决定是否调用 DeepSeek。"""
+    members: Dict[str, ModelDecision] = {}
+    committee_id = uuid4().hex
+
+    # GPT-4o-mini
+    try:
+        if overrides and "gpt-4o-mini" in overrides:
+            members["gpt-4o-mini"] = overrides["gpt-4o-mini"]
+        else:
+            members["gpt-4o-mini"] = await _call_gpt4omini(symbol, payload)
+    except (LLMClientError, Exception) as exc:  # noqa: BLE001
+        LOGGER.warning("front_gate gpt-4o-mini failed: %s", exc)
+        members["gpt-4o-mini"] = ModelDecision(
+            model_name="gpt-4o-mini",
+            bias="no-trade",
+            confidence=0.0,
+            raw_response={"error": str(exc)},
+        )
+
+    # GLM-4.5V
+    try:
+        if overrides and "glm-4.5v" in overrides:
+            members["glm-4.5v"] = overrides["glm-4.5v"]
+        else:
+            members["glm-4.5v"] = await _call_glm45v(symbol, payload)
+    except (LLMClientError, Exception) as exc:  # noqa: BLE001
+        LOGGER.warning("front_gate glm-4.5v failed: %s", exc)
+        members["glm-4.5v"] = ModelDecision(
+            model_name="glm-4.5v",
+            bias="no-trade",
+            confidence=0.0,
+            raw_response={"error": str(exc)},
+        )
+
+    m1 = members["gpt-4o-mini"]
+    m2 = members["glm-4.5v"]
+
+    final_decision = "no-trade"
+    committee_score = 0.0
+    final_confidence = 0.0
+    conflict_level = "high" if m1.bias != m2.bias else "low"
+
+    if m1.bias == m2.bias:
+        conflict_level = "low"
+        if m1.bias == "no-trade":
+            final_decision = "no-trade"
+        else:
+            conf = min(m1.confidence, m2.confidence)
+            if conf < 0.55:
+                final_decision = "no-trade"
+                final_confidence = conf
+                committee_score = 0.0
+                conflict_level = "medium"
+            else:
+                final_decision = m1.bias
+                final_confidence = conf
+                committee_score = conf * (1 if final_decision == "long" else -1)
+    else:
+        final_decision = "no-trade"
+        committee_score = 0.0
+        final_confidence = 0.0
+        conflict_level = "high"
+
+    committee = CommitteeDecision(
+        final_decision=final_decision,
+        final_confidence=final_confidence,
+        committee_score=committee_score,
+        conflict_level=conflict_level,
+        members=[m1, m2],
+    )
+
+    def _log(md: ModelDecision, is_final: bool = False, extra: Optional[Dict[str, Any]] = None) -> None:
+        if ai_logger is None:
+            return
+        ai_logger.log_decision(
+            decision_type="decision",
+            symbol=symbol,
+            payload=payload,
+            result=extra or md.model_dump(),
+            tokens_used=None,
+            latency_ms=None,
+            model_name=md.model_name if not is_final else "committee_front",
+            committee_id=committee_id,
+            weight=FRONT_WEIGHTS.get(md.model_name) if not is_final else None,
+            is_final=is_final,
+        )
+
+    _log(m1)
+    _log(m2)
+    _log(
+        ModelDecision(
+            model_name="committee_front",
+            bias=committee.final_decision,
+            confidence=committee.final_confidence,
+            entry=None,
+            sl=None,
+            tp=None,
+            rr=None,
+            raw_response=committee.model_dump(),
+        ),
+        is_final=True,
+        extra=committee.model_dump(),
+    )
+    return committee
+
+
+def decide_front_gate_sync(
+    symbol: str,
+    payload: Dict[str, Any],
+    ai_logger: Optional[AIDecisionLogger] = None,
+    overrides: Optional[Dict[str, ModelDecision]] = None,
+) -> CommitteeDecision:
+    """同步封装，B1 前置双模型委员会。"""
+    return asyncio.run(decide_front_gate(symbol, payload, ai_logger=ai_logger, overrides=overrides))
+
+
 async def decide_with_committee(
     symbol: str,
     payload: Dict[str, Any],

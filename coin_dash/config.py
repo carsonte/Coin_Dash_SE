@@ -147,6 +147,7 @@ class EventTriggersCfg(BaseModel):
 
 
 class AppConfig(BaseModel):
+    # 启用 B1 前置双模型委员会（gpt-4o-mini + glm-4.5v），决定是否调用 DeepSeek
     enable_multi_model_committee: bool = True
     symbols: List[str] = Field(default_factory=lambda: ["BTCUSDm", "ETHUSDm", "XAUUSDm"])
     timeframes: TimeframeCfg = Field(default_factory=TimeframeCfg)
