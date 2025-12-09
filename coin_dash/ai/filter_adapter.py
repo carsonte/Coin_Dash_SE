@@ -6,6 +6,7 @@ import os
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 
 import requests
+from coin_dash.llm_clients import call_glm45v
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
@@ -146,6 +147,10 @@ class PreFilterClient:
             glm_result = GlmFilterResult.from_response(data)
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("glm_prefilter_error err=%s", exc)
+            # 兜底：尝试用前置模型的 GLM 路线做一次临时判断
+            fb = self._fallback_committee_glm(feature_context)
+            if fb:
+                return fb
             return self._fallback_on_error(str(exc))
         glm_result = self._apply_rules(glm_result, is_review=is_review, strong_triggers=strong)
         return glm_result
@@ -390,3 +395,54 @@ class PreFilterClient:
             danger_flags=["glm_error"],
             failed_conditions=["glm_error"],
         )
+
+    def _fallback_committee_glm(self, feature_context: Dict[str, Any]) -> Optional[GlmFilterResult]:
+        """当预过滤失败时，复用前置模型的 GLM 路线做临时放行判断。"""
+        api_key = os.getenv("GLM_API_KEY")
+        base = os.getenv("GLM_API_BASE") or "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+        if not api_key:
+            return None
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是预过滤兜底助手，只返回 JSON："
+                    '{"bias":"long|short|no-trade","confidence":0-1}. '
+                    "bias!=no-trade 表示允许继续调用 DeepSeek。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps({"features": feature_context}, ensure_ascii=False),
+            },
+        ]
+        try:
+            resp = asyncio.run(call_glm45v(messages, model="glm-4.5v", request_timeout=8, api_base=base, api_key=api_key))
+            bias = "no-trade"
+            confidence = 0.0
+            if isinstance(resp, dict):
+                choices = resp.get("choices") or []
+                if choices and isinstance(choices[0], dict):
+                    msg = choices[0].get("message") or {}
+                    content = str(msg.get("content") or "")
+                    try:
+                        data = json.loads(content)
+                        bias = str(data.get("bias") or "no-trade").lower()
+                        confidence = float(data.get("confidence") or 0.0)
+                    except Exception:
+                        pass
+            allow = bias in ("long", "short")
+            return GlmFilterResult(
+                should_call_deepseek=allow,
+                reason=f"fallback_committee_glm:{bias}",
+                trend_consistency="weak",
+                volatility_status="normal",
+                structure_relevance="structure_missing",
+                pattern_candidate="none",
+                danger_flags=["glm_error"],
+                met_conditions=["fallback_committee_glm"] if allow else [],
+                failed_conditions=["fallback_committee_glm_blocked"] if not allow else [],
+            )
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("fallback_committee_glm_error err=%s", exc)
+            return None

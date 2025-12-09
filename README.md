@@ -17,7 +17,7 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
 - **GLM 双线路兜底**：前置/预过滤支持主线路失败时切换备用线路。主线路用 `GLM_API_KEY`/`GLM_API_BASE`（或 `ZHIPUAI_API_KEY`/`ZHIPUAI_API_BASE`），可选备用：`GLM_FALLBACK_API_KEY`/`GLM_FALLBACK_API_BASE`、`ZHIPU_FALLBACK_API_KEY`/`ZHIPU_FALLBACK_API_BASE`，默认备用指向官方 `https://open.bigmodel.cn/api/paas/v4/chat/completions`。
 - **符号切换**：默认符号改为 MT5 合约 `BTCUSDm`、`ETHUSDm`，并新增黄金 `XAUUSDm`（可在 `config.live.symbols` 直接跑多品种），live/backtest 示例命令同步更新。
 - **成交价来源**：PaperBroker 开仓价使用最新 bid/ask（多头用 ask，空头用 bid），确保模拟成交贴合盘口。
-- **GLM 预过滤升级**：预过滤输出结构化 `GlmFilterResult`（趋势一致性/波动/结构位置/形态候选/危险标签），按“市场状态过滤器 + 成本守门人”规则挡掉趋势冲突、ATR 极端、结构中轴/缺失、无形态候选、whipsaw/流动性差；`glm_filter.on_error` 可选 `call_deepseek/hold` 兜底，标签透传给 DeepSeek 提升决策上下文。
+- **GLM 预过滤升级**：预过滤输出结构化 `GlmFilterResult`（趋势一致性/波动/结构位置/形态候选/危险标签），按“市场状态过滤器 + 成本守门人”规则挡掉趋势冲突、ATR 极端、结构中轴/缺失、无形态候选、whipsaw/流动性差；`glm_filter.on_error` 可选 `call_deepseek/hold` 兜底；若预过滤自身出错，会尝试调用前置模型的 GLM 路线临时给出放行/否决判断。
 - **飞书推送验证**：`LARK_WEBHOOK` 写入 `.env` 后，可用 `python -m coin_dash.cli cards-test --symbol BTCUSDm` 快速发送测试卡片验证 webhook。
 - **黄金休盘检测**：`XAUUSDm` 若 bid/ask 缺失或最新 tick 超 180s 判定休盘，跳过 K 线/特征/DeepSeek/信号/纸盘；恢复有新 tick 后自动继续。
 
