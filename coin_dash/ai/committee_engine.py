@@ -3,14 +3,17 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, Dict, Optional, Tuple, List
+from typing import Any, Dict, Optional, Tuple, List, TYPE_CHECKING
 from uuid import uuid4
 
 from .committee_aggregator import WEIGHTS, aggregate_committee
+from .committee_config import COMMITTEE_WEIGHTS, FRONT_WEIGHTS, MODEL_GLM, MODEL_GPT4OMINI
 from .committee_schemas import CommitteeDecision, ModelDecision
 from ..llm_clients import LLMClientError, call_glm45v, call_gpt4omini
 from .models import Decision
 from ..db.ai_decision_logger import AIDecisionLogger
+if TYPE_CHECKING:
+    from ..config import LLMClientsCfg, LLMEndpointCfg
 
 LOGGER = logging.getLogger(__name__)
 
@@ -73,9 +76,10 @@ def _parse_llm_json(raw_content: str, model_name: str) -> ModelDecision:
     )
 
 
-async def _call_gpt4omini(symbol: str, payload: Dict[str, Any]) -> ModelDecision:
+async def _call_gpt4omini(symbol: str, payload: Dict[str, Any], client_kwargs: Optional[Dict[str, Any]] = None) -> ModelDecision:
     messages = _build_messages(symbol, payload, role_hint="趋势官")
-    resp = await call_gpt4omini(messages, max_tokens=256)
+    kwargs = client_kwargs or {}
+    resp = await call_gpt4omini(messages, max_tokens=256, **kwargs)
     text = ""
     if isinstance(resp, dict):
         choices = resp.get("choices") or []
@@ -84,9 +88,10 @@ async def _call_gpt4omini(symbol: str, payload: Dict[str, Any]) -> ModelDecision
     return _parse_llm_json(text, "gpt-4o-mini")
 
 
-async def _call_glm45v(symbol: str, payload: Dict[str, Any]) -> ModelDecision:
+async def _call_glm45v(symbol: str, payload: Dict[str, Any], client_kwargs: Optional[Dict[str, Any]] = None) -> ModelDecision:
     messages = _build_messages(symbol, payload, role_hint="结构官")
-    resp = await call_glm45v(messages, model="glm-4.5-air", max_tokens=256)
+    kwargs = client_kwargs or {}
+    resp = await call_glm45v(messages, model="glm-4.5-air", max_tokens=256, **kwargs)
     text = ""
     if isinstance(resp, dict):
         choices = resp.get("choices") or []
@@ -123,10 +128,37 @@ async def decide_front_gate(
     payload: Dict[str, Any],
     ai_logger: Optional[AIDecisionLogger] = None,
     overrides: Optional[Dict[str, ModelDecision]] = None,
+    llm_cfg: Optional["LLMClientsCfg"] = None,
 ) -> CommitteeDecision:
     """前置双模型委员会（gpt-4o-mini + glm-4.5-air），决定是否调用 DeepSeek。"""
     members: Dict[str, ModelDecision] = {}
     committee_id = uuid4().hex
+    glm_cfg: Optional["LLMEndpointCfg"] = llm_cfg.glm if llm_cfg else None
+    glm_fallback: Optional["LLMEndpointCfg"] = llm_cfg.glm_fallback if llm_cfg else None
+    gpt_cfg: Optional["LLMEndpointCfg"] = llm_cfg.gpt4omini if llm_cfg else None
+
+    gpt_kwargs: Dict[str, Any] = {}
+    if gpt_cfg:
+        if gpt_cfg.api_key:
+            gpt_kwargs["api_key"] = gpt_cfg.api_key
+        if gpt_cfg.api_base:
+            gpt_kwargs["api_base"] = gpt_cfg.api_base
+        if gpt_cfg.model:
+            gpt_kwargs["model"] = gpt_cfg.model
+
+    glm_kwargs: Dict[str, Any] = {}
+    if glm_cfg:
+        if glm_cfg.api_key:
+            glm_kwargs["api_key"] = glm_cfg.api_key
+        if glm_cfg.api_base:
+            glm_kwargs["api_base"] = glm_cfg.api_base
+        if glm_cfg.model:
+            glm_kwargs["model"] = glm_cfg.model
+    if glm_fallback:
+        if glm_fallback.api_key:
+            glm_kwargs["fallback_api_key"] = glm_fallback.api_key
+        if glm_fallback.api_base:
+            glm_kwargs["fallback_api_base"] = glm_fallback.api_base
 
     async def _retry_call(fn, name: str) -> ModelDecision:
         attempts = 3
@@ -149,7 +181,9 @@ async def decide_front_gate(
         if overrides and MODEL_GPT4OMINI in overrides:
             members[MODEL_GPT4OMINI] = overrides[MODEL_GPT4OMINI]
         else:
-            members[MODEL_GPT4OMINI] = await _retry_call(lambda: _call_gpt4omini(symbol, payload), MODEL_GPT4OMINI)
+            members[MODEL_GPT4OMINI] = await _retry_call(
+                lambda: _call_gpt4omini(symbol, payload, client_kwargs=gpt_kwargs), MODEL_GPT4OMINI
+            )
     except (LLMClientError, Exception) as exc:  # noqa: BLE001
         LOGGER.warning("front_gate gpt-4o-mini failed: %s", exc)
         members[MODEL_GPT4OMINI] = ModelDecision(
@@ -164,7 +198,9 @@ async def decide_front_gate(
         if overrides and MODEL_GLM in overrides:
             members[MODEL_GLM] = overrides[MODEL_GLM]
         else:
-            members[MODEL_GLM] = await _retry_call(lambda: _call_glm45v(symbol, payload), MODEL_GLM)
+            members[MODEL_GLM] = await _retry_call(
+                lambda: _call_glm45v(symbol, payload, client_kwargs=glm_kwargs), MODEL_GLM
+            )
     except (LLMClientError, Exception) as exc:  # noqa: BLE001
         LOGGER.warning("front_gate glm-4.5-air failed: %s", exc)
         members[MODEL_GLM] = ModelDecision(
@@ -282,9 +318,10 @@ def decide_front_gate_sync(
     payload: Dict[str, Any],
     ai_logger: Optional[AIDecisionLogger] = None,
     overrides: Optional[Dict[str, ModelDecision]] = None,
+    llm_cfg: Optional["LLMClientsCfg"] = None,
 ) -> CommitteeDecision:
     """同步封装，B1 前置双模型委员会。"""
-    return asyncio.run(decide_front_gate(symbol, payload, ai_logger=ai_logger, overrides=overrides))
+    return asyncio.run(decide_front_gate(symbol, payload, ai_logger=ai_logger, overrides=overrides, llm_cfg=llm_cfg))
 
 
 async def decide_with_committee(
@@ -293,15 +330,40 @@ async def decide_with_committee(
     deepseek_client,
     ai_logger: Optional[AIDecisionLogger] = None,
     overrides: Optional[Dict[str, ModelDecision]] = None,
+    llm_cfg: Optional["LLMClientsCfg"] = None,
 ) -> Tuple[CommitteeDecision, Optional[Decision]]:
     """
-    并行调用 DeepSeek / GPT-4o-mini / GLM-4.5V，聚合为委员会决策。
+    并行调用 DeepSeek / GPT-4o-mini / GLM-4.5-air，聚合为委员会决策。
     - overrides 可用于测试，直接提供 ModelDecision 替换真实调用。
     """
     members: Dict[str, ModelDecision] = {}
     committee_id = uuid4().hex
     logger = ai_logger or getattr(deepseek_client, "ai_logger", None)
     ds_primary: Optional[Decision] = None
+    glm_cfg: Optional["LLMEndpointCfg"] = llm_cfg.glm if llm_cfg else None
+    glm_fallback: Optional["LLMEndpointCfg"] = llm_cfg.glm_fallback if llm_cfg else None
+    gpt_cfg: Optional["LLMEndpointCfg"] = llm_cfg.gpt4omini if llm_cfg else None
+    gpt_kwargs: Dict[str, Any] = {}
+    if gpt_cfg:
+        if gpt_cfg.api_key:
+            gpt_kwargs["api_key"] = gpt_cfg.api_key
+        if gpt_cfg.api_base:
+            gpt_kwargs["api_base"] = gpt_cfg.api_base
+        if gpt_cfg.model:
+            gpt_kwargs["model"] = gpt_cfg.model
+    glm_kwargs: Dict[str, Any] = {}
+    if glm_cfg:
+        if glm_cfg.api_key:
+            glm_kwargs["api_key"] = glm_cfg.api_key
+        if glm_cfg.api_base:
+            glm_kwargs["api_base"] = glm_cfg.api_base
+        if glm_cfg.model:
+            glm_kwargs["model"] = glm_cfg.model
+    if glm_fallback:
+        if glm_fallback.api_key:
+            glm_kwargs["fallback_api_key"] = glm_fallback.api_key
+        if glm_fallback.api_base:
+            glm_kwargs["fallback_api_base"] = glm_fallback.api_base
 
     # DeepSeek (同步客户端，放线程池)
     try:
@@ -327,11 +389,11 @@ async def decide_with_committee(
         if overrides and MODEL_GPT4OMINI in overrides:
             members[MODEL_GPT4OMINI] = overrides[MODEL_GPT4OMINI]
         else:
-            members[MODEL_GPT4OMINI] = await _call_gpt4omini(symbol, payload)
+            members[MODEL_GPT4OMINI] = await _call_gpt4omini(symbol, payload, client_kwargs=gpt_kwargs)
     except (LLMClientError, Exception) as exc:  # noqa: BLE001
         LOGGER.warning("committee gpt-4o-mini failed: %s", exc)
-        members["gpt-4o-mini"] = ModelDecision(
-            model_name="gpt-4o-mini",
+        members[MODEL_GPT4OMINI] = ModelDecision(
+            model_name=MODEL_GPT4OMINI,
             bias="no-trade",
             confidence=0.0,
             raw_response={"error": str(exc)},
@@ -342,11 +404,11 @@ async def decide_with_committee(
         if overrides and MODEL_GLM in overrides:
             members[MODEL_GLM] = overrides[MODEL_GLM]
         else:
-            members[MODEL_GLM] = await _call_glm45v(symbol, payload)
+            members[MODEL_GLM] = await _call_glm45v(symbol, payload, client_kwargs=glm_kwargs)
     except (LLMClientError, Exception) as exc:  # noqa: BLE001
         LOGGER.warning("committee glm-4.5-air failed: %s", exc)
-        members["glm-4.5-air"] = ModelDecision(
-            model_name="glm-4.5-air",
+        members[MODEL_GLM] = ModelDecision(
+            model_name=MODEL_GLM,
             bias="no-trade",
             confidence=0.0,
             raw_response={"error": str(exc)},

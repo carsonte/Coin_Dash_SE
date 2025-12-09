@@ -1000,7 +1000,12 @@ def cmd_deepseek_test(args: argparse.Namespace) -> None:
     cfg = load_config(args.config)
     _apply_notification_config(cfg)
 
-    client = DeepSeekClient(cfg.deepseek)
+    client = DeepSeekClient(
+        cfg.deepseek,
+        glm_cfg=cfg.glm_filter,
+        glm_client_cfg=cfg.llm.glm,
+        glm_fallback_cfg=cfg.llm.glm_fallback,
+    )
     if not client.enabled():
         raise SystemExit("DeepSeek 未启用或缺少 DEEPSEEK_API_KEY，请在 .env/config 设置并启用 deepseek.enabled=true")
 
@@ -1175,7 +1180,12 @@ def cmd_healthcheck(args: argparse.Namespace) -> None:
 
 
 
-        client = DeepSeekClient(cfg.deepseek)
+        client = DeepSeekClient(
+            cfg.deepseek,
+            glm_cfg=cfg.glm_filter,
+            glm_client_cfg=cfg.llm.glm,
+            glm_fallback_cfg=cfg.llm.glm_fallback,
+        )
 
 
 
@@ -1573,8 +1583,6 @@ if __name__ == "__main__":
 
 
     main()
-
-
 
 
 

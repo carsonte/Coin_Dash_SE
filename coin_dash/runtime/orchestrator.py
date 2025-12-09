@@ -54,7 +54,13 @@ class LiveOrchestrator:
         self.fetcher = LiveDataFetcher(cfg)
         self.pipeline = DataPipeline(cfg)
         decision_logger = db_services.ai_logger if (db_services and db_services.ai_logger) else None
-        self.deepseek = DeepSeekClient(cfg.deepseek, glm_cfg=cfg.glm_filter, decision_logger=decision_logger)
+        self.deepseek = DeepSeekClient(
+            cfg.deepseek,
+            glm_cfg=cfg.glm_filter,
+            glm_client_cfg=cfg.llm.glm,
+            glm_fallback_cfg=cfg.llm.glm_fallback,
+            decision_logger=decision_logger,
+        )
         self.webhook = webhook or cfg.notifications.lark_webhook
         self.state = StateManager(STATE_PATH)
         self.signal_manager = SignalManager(cfg.signals)
@@ -62,7 +68,7 @@ class LiveOrchestrator:
         self.run_id = run_id or (db_services.run_id if db_services else None)
         self.event_triggers_enabled = bool(getattr(cfg, "event_triggers", None) and cfg.event_triggers.enabled)
         self.glm_filter_enabled = bool(getattr(cfg, "glm_filter", None) and cfg.glm_filter.enabled)
-        self.glm_prefilter = PreFilterClient(cfg.glm_filter) if self.glm_filter_enabled else None
+        self.glm_prefilter = PreFilterClient(cfg.glm_filter, cfg.llm.glm, cfg.llm.glm_fallback) if self.glm_filter_enabled else None
         self.safe_mode_enabled = bool(getattr(cfg.performance, "safe_mode_enabled", False))
         safe_cfg = getattr(cfg.performance, "safe_mode", {}) or {}
         self.safe_mode_threshold = int(safe_cfg.get("consecutive_stop_losses", 0))

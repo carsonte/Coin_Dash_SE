@@ -11,7 +11,7 @@ from coin_dash.llm_clients import call_glm45v
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
-    from ..config import GLMFilterCfg
+    from ..config import GLMFilterCfg, LLMEndpointCfg
 
 LOGGER = logging.getLogger(__name__)
 
@@ -85,28 +85,36 @@ class PreFilterClient:
     def __init__(
         self,
         cfg: Optional["GLMFilterCfg"] = None,
+        glm_client_cfg: Optional["LLMEndpointCfg"] = None,
+        glm_fallback_cfg: Optional["LLMEndpointCfg"] = None,
         api_key: Optional[str] = None,
         endpoint: Optional[str] = None,
     ) -> None:
         self.enabled = bool(getattr(cfg, "enabled", True))
         self.on_error = (getattr(cfg, "on_error", None) or "call_deepseek").lower()
-        self.api_key = api_key or os.getenv("ZHIPUAI_API_KEY") or ""
-        self.model = os.getenv("ZHIPUAI_MODEL", "glm-4.5-air")
+        self.api_key = api_key or (glm_client_cfg.api_key if glm_client_cfg else None) or os.getenv("ZHIPUAI_API_KEY") or ""
+        self.model = (glm_client_cfg.model if glm_client_cfg else None) or os.getenv("ZHIPUAI_MODEL") or "glm-4.5-air"
         self.endpoint = (
             endpoint
+            or (glm_client_cfg.api_base if glm_client_cfg else None)
             or os.getenv("ZHIPUAI_API_BASE")
             or "https://api.ezworkapi.top/api/paas/v4/chat/completions"
         ).rstrip("/")
+        fb_base_cfg = glm_fallback_cfg.api_base if glm_fallback_cfg else None
+        fb_key_cfg = glm_fallback_cfg.api_key if glm_fallback_cfg else None
         self.fallback_base = (
-            os.getenv("ZHIPU_FALLBACK_API_BASE")
+            fb_base_cfg
+            or os.getenv("ZHIPU_FALLBACK_API_BASE")
             or os.getenv("ZHIPUAI_FALLBACK_API_BASE")
             or "https://api.ezworkapi.top/api/paas/v4/chat/completions"
         ).rstrip("/")
-        self.fallback_key = os.getenv("ZHIPU_FALLBACK_API_KEY") or os.getenv("ZHIPUAI_FALLBACK_API_KEY") or self.api_key
+        self.fallback_key = (
+            fb_key_cfg or os.getenv("ZHIPU_FALLBACK_API_KEY") or os.getenv("ZHIPUAI_FALLBACK_API_KEY") or self.api_key
+        )
         # OpenRouter 兼容：可选填 HTTP-Referer/X-Title（不填也能用）
         self.extra_headers: Dict[str, str] = {}
-        referer = os.getenv("ZHIPU_HTTP_REFERER") or os.getenv("OPENROUTER_HTTP_REFERER")
-        title = os.getenv("ZHIPU_HTTP_TITLE") or os.getenv("OPENROUTER_HTTP_TITLE")
+        referer = (glm_client_cfg.http_referer if glm_client_cfg else None) or os.getenv("ZHIPU_HTTP_REFERER") or os.getenv("OPENROUTER_HTTP_REFERER")
+        title = (glm_client_cfg.http_title if glm_client_cfg else None) or os.getenv("ZHIPU_HTTP_TITLE") or os.getenv("OPENROUTER_HTTP_TITLE")
         if referer:
             self.extra_headers["HTTP-Referer"] = referer
         if title:
@@ -399,9 +407,9 @@ class PreFilterClient:
 
     def _fallback_committee_glm(self, feature_context: Dict[str, Any]) -> Optional[GlmFilterResult]:
         """当预过滤失败时，复用前置模型的 GLM 路线做临时放行判断。"""
-        api_key = os.getenv("GLM_API_KEY")
-        base = os.getenv("GLM_API_BASE") or "https://api.ezworkapi.top/api/paas/v4/chat/completions"
-        if not api_key:
+        api_key = os.getenv("GLM_API_KEY") or self.fallback_key
+        base = os.getenv("GLM_API_BASE") or self.fallback_base
+        if not api_key or not base:
             return None
         messages = [
             {

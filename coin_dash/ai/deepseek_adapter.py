@@ -13,6 +13,7 @@ from .context import ConversationManager
 from .models import Decision, ReviewDecision
 if TYPE_CHECKING:
     from ..db.ai_decision_logger import AIDecisionLogger
+    from ..config import LLMEndpointCfg
 
 
 class DeepSeekClient:
@@ -20,6 +21,8 @@ class DeepSeekClient:
         self,
         cfg: DeepSeekCfg,
         glm_cfg: Optional[GLMFilterCfg] = None,
+        glm_client_cfg: Optional["LLMEndpointCfg"] = None,
+        glm_fallback_cfg: Optional["LLMEndpointCfg"] = None,
         conversation: Optional[ConversationManager] = None,
         decision_logger: Optional["AIDecisionLogger"] = None,
     ) -> None:
@@ -29,7 +32,7 @@ class DeepSeekClient:
         self.api_key = os.getenv("DEEPSEEK_API_KEY")
         self.api_base = os.getenv("DEEPSEEK_API_BASE", cfg.api_base).rstrip("/")
         self.ai_logger = decision_logger
-        self.prefilter = PreFilterClient(glm_cfg)
+        self.prefilter = PreFilterClient(glm_cfg, glm_client_cfg=glm_client_cfg, glm_fallback_cfg=glm_fallback_cfg)
 
     def enabled(self) -> bool:
         return self.cfg.enabled and bool(self.api_key)

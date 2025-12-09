@@ -146,6 +146,24 @@ class EventTriggersCfg(BaseModel):
     enabled: bool = False
 
 
+class LLMEndpointCfg(BaseModel):
+    api_key: str = ""
+    api_base: str = "https://api.ezworkapi.top/api/paas/v4/chat/completions"
+    model: str = "glm-4.5-air"
+    fallback_api_key: str = ""
+    fallback_api_base: str = ""
+    http_referer: str = ""
+    http_title: str = ""
+
+
+class LLMClientsCfg(BaseModel):
+    glm: LLMEndpointCfg = Field(default_factory=LLMEndpointCfg)
+    glm_fallback: LLMEndpointCfg = Field(default_factory=LLMEndpointCfg)
+    gpt4omini: LLMEndpointCfg = Field(
+        default_factory=lambda: LLMEndpointCfg(api_key="", api_base="", model="gpt-4o-mini")
+    )
+
+
 class AppConfig(BaseModel):
     # 启用 B1 前置双模型委员会（gpt-4o-mini + glm-4.5-air），决定是否调用 DeepSeek
     enable_multi_model_committee: bool = True
@@ -153,6 +171,7 @@ class AppConfig(BaseModel):
     timeframes: TimeframeCfg = Field(default_factory=TimeframeCfg)
     market_filter: MarketFilterCfg = Field(default_factory=MarketFilterCfg)
     data: DataCfg = Field(default_factory=DataCfg)
+    llm: LLMClientsCfg = Field(default_factory=LLMClientsCfg)
     live: LiveCfg = Field(default_factory=LiveCfg)
     risk: RiskCfg = Field(default_factory=RiskCfg)
     signals: SignalsCfg = Field(default_factory=SignalsCfg)
@@ -174,6 +193,40 @@ def load_config(path: Optional[Path] = None) -> AppConfig:
     # Ensure nested defaults exist
     data.setdefault("data", {})
     data.setdefault("live", {})
+    llm_cfg = data.setdefault("llm", {})
+    llm_cfg.setdefault("glm", {})
+    llm_cfg.setdefault("glm_fallback", {})
+    llm_cfg.setdefault("gpt4omini", {})
+    # 环境变量兼容：GLM/OPENROUTER/AIZEX
+    env_glm = os.getenv("GLM_API_KEY") or os.getenv("ZHIPUAI_API_KEY")
+    env_glm_base = os.getenv("GLM_API_BASE") or os.getenv("ZHIPUAI_API_BASE")
+    env_glm_model = os.getenv("GLM_MODEL") or os.getenv("ZHIPUAI_MODEL")
+    if env_glm:
+        llm_cfg["glm"]["api_key"] = env_glm
+    if env_glm_base:
+        llm_cfg["glm"]["api_base"] = env_glm_base
+    if env_glm_model:
+        llm_cfg["glm"]["model"] = env_glm_model
+    env_glm_fb = os.getenv("GLM_FALLBACK_API_KEY") or os.getenv("ZHIPU_FALLBACK_API_KEY")
+    env_glm_fb_base = os.getenv("GLM_FALLBACK_API_BASE") or os.getenv("ZHIPU_FALLBACK_API_BASE")
+    if env_glm_fb:
+        llm_cfg["glm_fallback"]["api_key"] = env_glm_fb
+    if env_glm_fb_base:
+        llm_cfg["glm_fallback"]["api_base"] = env_glm_fb_base
+    env_gpt = os.getenv("AIZEX_API_KEY")
+    env_gpt_base = os.getenv("AIZEX_API_BASE")
+    if env_gpt:
+        llm_cfg["gpt4omini"]["api_key"] = env_gpt
+    if env_gpt_base:
+        llm_cfg["gpt4omini"]["api_base"] = env_gpt_base
+    # 兼容 OpenRouter HTTP 头
+    referer = os.getenv("ZHIPU_HTTP_REFERER") or os.getenv("OPENROUTER_HTTP_REFERER")
+    title = os.getenv("ZHIPU_HTTP_TITLE") or os.getenv("OPENROUTER_HTTP_TITLE")
+    if referer:
+        llm_cfg["glm"]["http_referer"] = referer
+    if title:
+        llm_cfg["glm"]["http_title"] = title
+
     env_notifications = data.setdefault("notifications", {})
     env_webhook = os.getenv("LARK_WEBHOOK")
     if env_webhook:

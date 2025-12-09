@@ -53,9 +53,19 @@ def run_backtest(
     broker = PaperBroker(cfg.backtest.initial_equity, cfg.backtest.fee_rate)
     tracker = PerformanceTracker()
     decision_logger = db_services.ai_logger if (db_services and db_services.ai_logger) else None
-    deepseek_client = DeepSeekClient(cfg.deepseek, glm_cfg=cfg.glm_filter, decision_logger=decision_logger) if use_deepseek else None
+    deepseek_client = (
+        DeepSeekClient(
+            cfg.deepseek,
+            glm_cfg=cfg.glm_filter,
+            glm_client_cfg=cfg.llm.glm,
+            glm_fallback_cfg=cfg.llm.glm_fallback,
+            decision_logger=decision_logger,
+        )
+        if use_deepseek
+        else None
+    )
     glm_filter_enabled = bool(getattr(cfg, "glm_filter", None) and cfg.glm_filter.enabled)
-    glm_prefilter = PreFilterClient(cfg.glm_filter) if glm_filter_enabled else None
+    glm_prefilter = PreFilterClient(cfg.glm_filter, cfg.llm.glm, cfg.llm.glm_fallback) if glm_filter_enabled else None
     safe_mode_cfg = cfg.performance.safe_mode or {}
     safe_mode_threshold = safe_mode_cfg.get("consecutive_stop_losses", 0)
     safe_mode = DailySafeMode(safe_mode_threshold)
@@ -310,6 +320,7 @@ def _make_decision(
                 symbol,
                 payload,
                 ai_logger=getattr(client, "ai_logger", None),
+                llm_cfg=cfg.llm,
             )
         except Exception:
             return _hold("front_committee_failed")

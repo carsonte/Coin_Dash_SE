@@ -46,6 +46,17 @@ data:
   mt5_api:
     base_url: "http://43.156.27.55:5005"
 
+llm:
+  glm:
+    api_base: "https://api.ezworkapi.top/api/paas/v4/chat/completions"
+    model: "glm-4.5-air"
+  glm_fallback:
+    api_base: "https://api.ezworkapi.top/api/paas/v4/chat/completions"
+    model: "glm-4.5-air"
+  gpt4omini:
+    api_base: "https://aizex.top"
+    model: "gpt-4o-mini"
+
 market_filter:
   # 活跃度阈值（AI版已不再限制，仅保留字段）
   score_thresholds:

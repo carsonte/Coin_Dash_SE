@@ -36,8 +36,10 @@ async def call_gpt4omini(messages: List[Dict[str, Any]], **kwargs: Any) -> Dict[
     - 请求路径：<AIZEX_API_BASE>/v1/chat/completions
     - 返回值：原样返回 Aizex(OpenAI 风格) 的 JSON。
     """
-    api_key = os.getenv("AIZEX_API_KEY")
-    base = os.getenv("AIZEX_API_BASE")
+    api_key_override = kwargs.pop("api_key", None)
+    api_base_override = kwargs.pop("api_base", None)
+    api_key = api_key_override or os.getenv("AIZEX_API_KEY")
+    base = api_base_override or os.getenv("AIZEX_API_BASE")
     if not api_key:
         raise LLMClientError("AIZEX_API_KEY is missing")
     if not base:
@@ -46,7 +48,7 @@ async def call_gpt4omini(messages: List[Dict[str, Any]], **kwargs: Any) -> Dict[
     _validate_messages(messages)
 
     timeout = float(kwargs.pop("request_timeout", DEFAULT_TIMEOUT))
-    payload: Dict[str, Any] = {"model": "gpt-4o-mini", "messages": messages}
+    payload: Dict[str, Any] = {"model": kwargs.pop("model", "gpt-4o-mini"), "messages": messages}
     if kwargs:
         payload.update(kwargs)
 
@@ -64,4 +66,3 @@ async def call_gpt4omini(messages: List[Dict[str, Any]], **kwargs: Any) -> Dict[
         raise LLMClientError(f"Aizex request failed: status={status} body={text[:200]}") from exc
     except requests.RequestException as exc:  # noqa: BLE001
         raise LLMClientError(f"Aizex network error: {exc}") from exc
-
