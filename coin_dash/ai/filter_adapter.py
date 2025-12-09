@@ -95,6 +95,12 @@ class PreFilterClient:
             or os.getenv("ZHIPUAI_API_BASE")
             or "https://open.bigmodel.cn/api/paas/v4/chat/completions"
         ).rstrip("/")
+        self.fallback_base = (
+            os.getenv("ZHIPU_FALLBACK_API_BASE")
+            or os.getenv("ZHIPUAI_FALLBACK_API_BASE")
+            or "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+        ).rstrip("/")
+        self.fallback_key = os.getenv("ZHIPU_FALLBACK_API_KEY") or os.getenv("ZHIPUAI_FALLBACK_API_KEY") or self.api_key
         # OpenRouter 兼容：可选填 HTTP-Referer/X-Title（不填也能用）
         self.extra_headers: Dict[str, str] = {}
         referer = os.getenv("ZHIPU_HTTP_REFERER") or os.getenv("OPENROUTER_HTTP_REFERER")
@@ -244,27 +250,34 @@ class PreFilterClient:
         return {"model": model, "messages": messages, "temperature": 0, "stream": False}
 
     def _chat_completion(self, payload: Dict[str, Any]) -> str:
-        url = f"{self.endpoint}"
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        headers.update(self.extra_headers)
         attempts = 3
         last_exc: Exception | None = None
-        for i in range(attempts):
-            try:
-                resp = self.session.post(url, json=payload, headers=headers, timeout=8)
-                resp.raise_for_status()
-                data = resp.json()
-                return data["choices"][0]["message"]["content"]
-            except requests.RequestException as exc:
-                last_exc = exc
-                if i < attempts - 1:
-                    continue
-                raise
-            except Exception as exc:  # noqa: BLE001
-                last_exc = exc
-                if i < attempts - 1:
-                    continue
-                raise
+        candidates = [
+            (self.endpoint, self.api_key),
+        ]
+        if self.fallback_base and (self.fallback_base != self.endpoint or self.fallback_key != self.api_key):
+            candidates.append((self.fallback_base, self.fallback_key))
+
+        for base, key in candidates:
+            url = f"{base}"
+            headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+            headers.update(self.extra_headers)
+            for i in range(attempts):
+                try:
+                    resp = self.session.post(url, json=payload, headers=headers, timeout=8)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    return data["choices"][0]["message"]["content"]
+                except requests.RequestException as exc:
+                    last_exc = exc
+                    if i < attempts - 1:
+                        continue
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    last_exc = exc
+                    if i < attempts - 1:
+                        continue
+                    break
         if last_exc:
             raise last_exc
 

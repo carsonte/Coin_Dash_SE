@@ -14,6 +14,7 @@ Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则�
 - **决策持久化/接口**：`ai_decisions` 记录 `model_name`/`committee_id`/`weight`/`is_final`，前置委员会会落一条 `committee_front` 总结，成员各一条；API `/api/decisions` 支持按 `committee_id`/`model_name` 过滤并返回新字段（向后兼容）。
 - **DeepSeek 提示词（执行官模式）**：角色简化为“执行交易员”，信任 GLM 预过滤 + 前置委员会共识，不再反复判断大环境；只输出 JSON 方案（方向/入场/止损/止盈/仓位/风险评分），允许在结构一般时给出轻仓试探而不是过度观望。
 - **MT5 实时行情**：新增 `mt5_api` 数据源（默认启用），从 MT5 API 拉取 `/ohlc`、`/price`；tick_volume → volume，秒级时间戳升序。`data.provider` 可切换回 `ccxt`。
+- **GLM 双线路兜底**：前置/预过滤支持主线路失败时切换备用线路。主线路用 `GLM_API_KEY`/`GLM_API_BASE`（或 `ZHIPUAI_API_KEY`/`ZHIPUAI_API_BASE`），可选备用：`GLM_FALLBACK_API_KEY`/`GLM_FALLBACK_API_BASE`、`ZHIPU_FALLBACK_API_KEY`/`ZHIPU_FALLBACK_API_BASE`，默认备用指向官方 `https://open.bigmodel.cn/api/paas/v4/chat/completions`。
 - **符号切换**：默认符号改为 MT5 合约 `BTCUSDm`、`ETHUSDm`，并新增黄金 `XAUUSDm`（可在 `config.live.symbols` 直接跑多品种），live/backtest 示例命令同步更新。
 - **成交价来源**：PaperBroker 开仓价使用最新 bid/ask（多头用 ask，空头用 bid），确保模拟成交贴合盘口。
 - **GLM 预过滤升级**：预过滤输出结构化 `GlmFilterResult`（趋势一致性/波动/结构位置/形态候选/危险标签），按“市场状态过滤器 + 成本守门人”规则挡掉趋势冲突、ATR 极端、结构中轴/缺失、无形态候选、whipsaw/流动性差；`glm_filter.on_error` 可选 `call_deepseek/hold` 兜底，标签透传给 DeepSeek 提升决策上下文。

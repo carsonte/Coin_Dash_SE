@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import requests
 
@@ -39,6 +39,8 @@ async def call_glm45v(messages: List[Dict[str, Any]], **kwargs: Any) -> Dict[str
     """
     api_key = os.getenv("GLM_API_KEY")
     base = os.getenv("GLM_API_BASE") or DEFAULT_GLM_BASE
+    fallback_base = os.getenv("GLM_FALLBACK_API_BASE")
+    fallback_key = os.getenv("GLM_FALLBACK_API_KEY") or api_key
     if not api_key:
         raise LLMClientError("GLM_API_KEY is missing")
 
@@ -50,18 +52,28 @@ async def call_glm45v(messages: List[Dict[str, Any]], **kwargs: Any) -> Dict[str
     if kwargs:
         payload.update(kwargs)
 
-    url = base.rstrip("/")
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    candidates: List[Tuple[str, str]] = [(api_key, base.rstrip("/"))]
+    if fallback_base and (fallback_base.rstrip("/") != base.rstrip("/") or fallback_key != api_key):
+        candidates.append((fallback_key, fallback_base.rstrip("/")))
 
-    try:
-        return await asyncio.to_thread(_sync_post, url, headers, payload, timeout)
-    except requests.HTTPError as exc:
-        status = exc.response.status_code if exc.response is not None else "unknown"
-        text = exc.response.text if exc.response is not None else str(exc)
-        raise LLMClientError(f"GLM-4.5V request failed: status={status} body={text[:200]}") from exc
-    except requests.RequestException as exc:  # noqa: BLE001
-        raise LLMClientError(f"GLM-4.5V network error: {exc}") from exc
-
+    last_exc: Exception | None = None
+    for key, url in candidates:
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        }
+        try:
+            return await asyncio.to_thread(_sync_post, url, headers, payload, timeout)
+        except requests.HTTPError as exc:
+            last_exc = exc
+            continue
+        except requests.RequestException as exc:  # noqa: BLE001
+            last_exc = exc
+            continue
+    if last_exc:
+        if isinstance(last_exc, requests.HTTPError):
+            status = last_exc.response.status_code if last_exc.response is not None else "unknown"
+            text = last_exc.response.text if last_exc.response is not None else str(last_exc)
+            raise LLMClientError(f"GLM-4.5V request failed: status={status} body={text[:200]}") from last_exc
+        raise LLMClientError(f"GLM-4.5V network error: {last_exc}") from last_exc
+    raise LLMClientError("GLM-4.5V request failed: unknown error")
