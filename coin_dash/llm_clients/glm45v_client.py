@@ -10,7 +10,8 @@ from .errors import LLMClientError
 
 
 DEFAULT_TIMEOUT = 30
-DEFAULT_GLM_BASE = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+# 默认改用第三方 glm-4.5-air 代理（OpenAI 兼容）
+DEFAULT_GLM_BASE = "https://api.ezworkapi.top/api/paas/v4/chat/completions"
 
 
 def _validate_messages(messages: List[Dict[str, Any]]) -> None:
@@ -32,22 +33,27 @@ def _sync_post(url: str, headers: Dict[str, str], payload: Dict[str, Any], timeo
 
 async def call_glm45v(messages: List[Dict[str, Any]], **kwargs: Any) -> Dict[str, Any]:
     """
-    调用官方 GLM-4.5V 接口，返回 OpenAI 风格 response dict。
+    调用 glm-4.5-air 兼容接口（默认走 ezworkapi 代理），返回 OpenAI 风格 response dict。
     - 读取环境变量 GLM_API_KEY / GLM_API_BASE
-    - 默认模型 glm-4.5v
+    - 默认模型 glm-4.5-air
     - 目前仅支持文本消息，后续可扩展 image_url/video_url。
     """
-    api_key = os.getenv("GLM_API_KEY")
-    base = os.getenv("GLM_API_BASE") or DEFAULT_GLM_BASE
-    fallback_base = os.getenv("GLM_FALLBACK_API_BASE")
-    fallback_key = os.getenv("GLM_FALLBACK_API_KEY") or api_key
+    api_key_override = kwargs.pop("api_key", None)
+    api_base_override = kwargs.pop("api_base", None)
+    fallback_api_key_override = kwargs.pop("fallback_api_key", None)
+    fallback_api_base_override = kwargs.pop("fallback_api_base", None)
+
+    api_key = api_key_override or os.getenv("GLM_API_KEY")
+    base = api_base_override or os.getenv("GLM_API_BASE") or DEFAULT_GLM_BASE
+    fallback_base = fallback_api_base_override or os.getenv("GLM_FALLBACK_API_BASE")
+    fallback_key = fallback_api_key_override or os.getenv("GLM_FALLBACK_API_KEY") or api_key
     if not api_key:
         raise LLMClientError("GLM_API_KEY is missing")
 
     _validate_messages(messages)
 
     timeout = float(kwargs.pop("request_timeout", DEFAULT_TIMEOUT))
-    model = kwargs.pop("model", "glm-4.5v")
+    model = kwargs.pop("model", "glm-4.5-air")
     payload: Dict[str, Any] = {"model": model, "messages": messages}
     if kwargs:
         payload.update(kwargs)

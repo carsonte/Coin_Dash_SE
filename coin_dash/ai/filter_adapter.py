@@ -77,7 +77,7 @@ class GlmFilterResult(BaseModel):
 
 class PreFilterClient:
     """
-    Market-state filter backed by GLM-4.5-Flash.
+    Market-state filter backed by GLM-4.5-air（ezworkapi）。
     - 输出结构化标签（趋势一致性、波动、结构位置、形态候选等）。
     - 按规则挡掉危险/垃圾行情，作为 DeepSeek 的成本守门人。
     """
@@ -91,16 +91,16 @@ class PreFilterClient:
         self.enabled = bool(getattr(cfg, "enabled", True))
         self.on_error = (getattr(cfg, "on_error", None) or "call_deepseek").lower()
         self.api_key = api_key or os.getenv("ZHIPUAI_API_KEY") or ""
-        self.model = os.getenv("ZHIPUAI_MODEL", "glm-4.5-flash")
+        self.model = os.getenv("ZHIPUAI_MODEL", "glm-4.5-air")
         self.endpoint = (
             endpoint
             or os.getenv("ZHIPUAI_API_BASE")
-            or "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+            or "https://api.ezworkapi.top/api/paas/v4/chat/completions"
         ).rstrip("/")
         self.fallback_base = (
             os.getenv("ZHIPU_FALLBACK_API_BASE")
             or os.getenv("ZHIPUAI_FALLBACK_API_BASE")
-            or "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+            or "https://api.ezworkapi.top/api/paas/v4/chat/completions"
         ).rstrip("/")
         self.fallback_key = os.getenv("ZHIPU_FALLBACK_API_KEY") or os.getenv("ZHIPUAI_FALLBACK_API_KEY") or self.api_key
         # OpenRouter 兼容：可选填 HTTP-Referer/X-Title（不填也能用）
@@ -400,7 +400,7 @@ class PreFilterClient:
     def _fallback_committee_glm(self, feature_context: Dict[str, Any]) -> Optional[GlmFilterResult]:
         """当预过滤失败时，复用前置模型的 GLM 路线做临时放行判断。"""
         api_key = os.getenv("GLM_API_KEY")
-        base = os.getenv("GLM_API_BASE") or "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+        base = os.getenv("GLM_API_BASE") or "https://api.ezworkapi.top/api/paas/v4/chat/completions"
         if not api_key:
             return None
         messages = [
@@ -418,7 +418,9 @@ class PreFilterClient:
             },
         ]
         try:
-            resp = asyncio.run(call_glm45v(messages, model="glm-4.5v", request_timeout=8, api_base=base, api_key=api_key))
+            resp = asyncio.run(
+                call_glm45v(messages, model="glm-4.5-air", request_timeout=8, api_base=base, api_key=api_key)
+            )
             bias = "no-trade"
             confidence = 0.0
             if isinstance(resp, dict):

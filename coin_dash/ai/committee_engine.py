@@ -86,13 +86,13 @@ async def _call_gpt4omini(symbol: str, payload: Dict[str, Any]) -> ModelDecision
 
 async def _call_glm45v(symbol: str, payload: Dict[str, Any]) -> ModelDecision:
     messages = _build_messages(symbol, payload, role_hint="结构官")
-    resp = await call_glm45v(messages, model="glm-4.5v", max_tokens=256)
+    resp = await call_glm45v(messages, model="glm-4.5-air", max_tokens=256)
     text = ""
     if isinstance(resp, dict):
         choices = resp.get("choices") or []
         if choices and isinstance(choices[0], dict):
             text = str((choices[0].get("message") or {}).get("content") or "")
-    return _parse_llm_json(text, "glm-4.5v")
+    return _parse_llm_json(text, "glm-4.5-air")
 
 
 def _decision_to_member(decision: Decision, model_name: str = "deepseek") -> ModelDecision:
@@ -115,7 +115,7 @@ def _decision_to_member(decision: Decision, model_name: str = "deepseek") -> Mod
     )
 
 
-FRONT_WEIGHTS: Dict[str, float] = {"gpt-4o-mini": 0.6, "glm-4.5v": 0.4}
+FRONT_WEIGHTS: Dict[str, float] = {"gpt-4o-mini": 0.6, "glm-4.5-air": 0.4}
 
 
 async def decide_front_gate(
@@ -124,7 +124,7 @@ async def decide_front_gate(
     ai_logger: Optional[AIDecisionLogger] = None,
     overrides: Optional[Dict[str, ModelDecision]] = None,
 ) -> CommitteeDecision:
-    """前置双模型委员会（gpt-4o-mini + glm-4.5v），决定是否调用 DeepSeek。"""
+    """前置双模型委员会（gpt-4o-mini + glm-4.5-air），决定是否调用 DeepSeek。"""
     members: Dict[str, ModelDecision] = {}
     committee_id = uuid4().hex
 
@@ -161,21 +161,21 @@ async def decide_front_gate(
 
     # GLM-4.5V
     try:
-        if overrides and "glm-4.5v" in overrides:
-            members["glm-4.5v"] = overrides["glm-4.5v"]
+        if overrides and "glm-4.5-air" in overrides:
+            members["glm-4.5-air"] = overrides["glm-4.5-air"]
         else:
-            members["glm-4.5v"] = await _retry_call(lambda: _call_glm45v(symbol, payload), "glm-4.5v")
+            members["glm-4.5-air"] = await _retry_call(lambda: _call_glm45v(symbol, payload), "glm-4.5-air")
     except (LLMClientError, Exception) as exc:  # noqa: BLE001
-        LOGGER.warning("front_gate glm-4.5v failed: %s", exc)
-        members["glm-4.5v"] = ModelDecision(
-            model_name="glm-4.5v",
+        LOGGER.warning("front_gate glm-4.5-air failed: %s", exc)
+        members["glm-4.5-air"] = ModelDecision(
+            model_name="glm-4.5-air",
             bias="abstain",
             confidence=0.0,
             raw_response={"error": str(exc)},
         )
 
     m1 = members["gpt-4o-mini"]
-    m2 = members["glm-4.5v"]
+    m2 = members["glm-4.5-air"]
 
     def _glm_fallback(payload: Dict[str, Any]) -> ModelDecision | None:
         glm_snapshot = payload.get("glm_filter_result") or {}
@@ -337,22 +337,22 @@ async def decide_with_committee(
             raw_response={"error": str(exc)},
         )
 
-    # GLM-4.5V
+    # GLM-4.5-air
     try:
-        if overrides and "glm-4.5v" in overrides:
-            members["glm-4.5v"] = overrides["glm-4.5v"]
+        if overrides and "glm-4.5-air" in overrides:
+            members["glm-4.5-air"] = overrides["glm-4.5-air"]
         else:
-            members["glm-4.5v"] = await _call_glm45v(symbol, payload)
+            members["glm-4.5-air"] = await _call_glm45v(symbol, payload)
     except (LLMClientError, Exception) as exc:  # noqa: BLE001
-        LOGGER.warning("committee glm-4.5v failed: %s", exc)
-        members["glm-4.5v"] = ModelDecision(
-            model_name="glm-4.5v",
+        LOGGER.warning("committee glm-4.5-air failed: %s", exc)
+        members["glm-4.5-air"] = ModelDecision(
+            model_name="glm-4.5-air",
             bias="no-trade",
             confidence=0.0,
             raw_response={"error": str(exc)},
         )
 
-    ordered = [members.get("deepseek"), members.get("gpt-4o-mini"), members.get("glm-4.5v")]
+    ordered = [members.get("deepseek"), members.get("gpt-4o-mini"), members.get("glm-4.5-air")]
     if any(m is None for m in ordered):
         raise RuntimeError("committee missing member decisions")
 

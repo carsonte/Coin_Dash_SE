@@ -24,7 +24,7 @@ async def _run_client(name: str, func) -> None:
 
 async def main() -> None:
     await _run_client("gpt-4o-mini@aizex", call_gpt4omini)
-    await _run_client("glm-4.5v", call_glm45v)
+    await _run_client("glm-4.5-air", call_glm45v)
 
 
 if __name__ == "__main__":

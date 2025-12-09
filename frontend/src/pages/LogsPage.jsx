@@ -39,7 +39,7 @@ const { RangePicker } = DatePicker;
 const modelOptions = [
   { label: "DeepSeek", value: "DeepSeek" },
   { label: "gpt-4o-mini", value: "gpt-4o-mini" },
-  { label: "glm-4.5v", value: "glm-4.5v" },
+  { label: "glm-4.5-air", value: "glm-4.5-air" },
   { label: "committee", value: "committee" },
 ];
 

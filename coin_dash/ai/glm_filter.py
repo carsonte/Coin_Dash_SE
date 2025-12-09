@@ -60,7 +60,7 @@ async def _post_glm(payload: Dict[str, Any], timeout: float) -> str:
     api_key = os.getenv("ZHIPUAI_API_KEY") or ""
     if not api_key:
         raise RuntimeError("ZHIPUAI_API_KEY not set")
-    base = (os.getenv("ZHIPUAI_API_BASE") or "https://open.bigmodel.cn/api/paas/v4").rstrip("/")
+    base = (os.getenv("ZHIPUAI_API_BASE") or "https://api.ezworkapi.top/api/paas/v4").rstrip("/")
     url = f"{base}/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
@@ -105,7 +105,7 @@ async def glm_screen_opportunity(mtf_context) -> Dict[str, Any]:
     机会初筛：调用 GLM 判断是否需要 DeepSeek。
     - 解析失败或字段缺失时，should_call 强制为 True（兜底）。
     """
-    model = os.getenv("ZHIPUAI_MODEL", "glm-4.5-flash")
+    model = os.getenv("ZHIPUAI_MODEL", "glm-4.5-air")
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": f"{PROMPT}\n\nmtf_context:\n{json.dumps(mtf_context, ensure_ascii=False, indent=2)}"}],

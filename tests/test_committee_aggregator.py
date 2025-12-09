@@ -9,7 +9,7 @@ def md(model_name: str, bias: str, conf: float = 0.5) -> ModelDecision:
 
 
 def test_long_long_short():
-    decisions = [md("deepseek", "long"), md("gpt-4o-mini", "long"), md("glm-4.5v", "short")]
+    decisions = [md("deepseek", "long"), md("gpt-4o-mini", "long"), md("glm-4.5-air", "short")]
     res = aggregate_committee(decisions)
     assert res.final_decision == "long"
     assert res.committee_score == 0.5 + 0.3 - 0.2
@@ -17,7 +17,7 @@ def test_long_long_short():
 
 
 def test_ds_short_others_long_force_notrade():
-    decisions = [md("deepseek", "short"), md("gpt-4o-mini", "long"), md("glm-4.5v", "long")]
+    decisions = [md("deepseek", "short"), md("gpt-4o-mini", "long"), md("glm-4.5-air", "long")]
     res = aggregate_committee(decisions)
     assert res.final_decision == "no-trade"
     assert res.committee_score == 0.0
@@ -25,14 +25,14 @@ def test_ds_short_others_long_force_notrade():
 
 
 def test_ds_long_others_short_force_notrade():
-    decisions = [md("deepseek", "long"), md("gpt-4o-mini", "short"), md("glm-4.5v", "short")]
+    decisions = [md("deepseek", "long"), md("gpt-4o-mini", "short"), md("glm-4.5-air", "short")]
     res = aggregate_committee(decisions)
     assert res.final_decision == "no-trade"
     assert res.committee_score == 0.0
 
 
 def test_all_no_trade():
-    decisions = [md("deepseek", "no-trade"), md("gpt-4o-mini", "no-trade"), md("glm-4.5v", "no-trade")]
+    decisions = [md("deepseek", "no-trade"), md("gpt-4o-mini", "no-trade"), md("glm-4.5-air", "no-trade")]
     res = aggregate_committee(decisions)
     assert res.final_decision == "no-trade"
     assert res.committee_score == 0.0
@@ -40,7 +40,7 @@ def test_all_no_trade():
 
 
 def test_only_ds_long_others_neutral():
-    decisions = [md("deepseek", "long"), md("gpt-4o-mini", "no-trade"), md("glm-4.5v", "no-trade")]
+    decisions = [md("deepseek", "long"), md("gpt-4o-mini", "no-trade"), md("glm-4.5-air", "no-trade")]
     res = aggregate_committee(decisions)
     assert res.final_decision == "long"
     assert res.committee_score == 0.5

@@ -29,7 +29,7 @@ def test_api_decisions_with_committee_filter(monkeypatch):
     # three models + final
     logger.log_decision("decision", "BTCUSDm", payload, result, None, None, model_name="deepseek", committee_id=committee_id, weight=0.5)
     logger.log_decision("decision", "BTCUSDm", payload, result, None, None, model_name="gpt-4o-mini", committee_id=committee_id, weight=0.3)
-    logger.log_decision("decision", "BTCUSDm", payload, result, None, None, model_name="glm-4.5v", committee_id=committee_id, weight=0.2)
+    logger.log_decision("decision", "BTCUSDm", payload, result, None, None, model_name="glm-4.5-air", committee_id=committee_id, weight=0.2)
     logger.log_decision("decision", "BTCUSDm", payload, result, None, None, model_name="committee", committee_id=committee_id, weight=None, is_final=True)
 
     # sanity check rows exist
@@ -45,6 +45,6 @@ def test_api_decisions_with_committee_filter(monkeypatch):
     data = resp.json()
     assert data["total"] == 4
     models = {item["model_name"] for item in data["items"]}
-    assert {"deepseek", "gpt-4o-mini", "glm-4.5v", "committee"} <= models
+    assert {"deepseek", "gpt-4o-mini", "glm-4.5-air", "committee"} <= models
     finals = [item for item in data["items"] if item["is_final"]]
     assert len(finals) == 1
