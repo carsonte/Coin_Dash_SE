@@ -146,14 +146,14 @@ async def decide_front_gate(
 
     # GPT-4o-mini
     try:
-        if overrides and "gpt-4o-mini" in overrides:
-            members["gpt-4o-mini"] = overrides["gpt-4o-mini"]
+        if overrides and MODEL_GPT4OMINI in overrides:
+            members[MODEL_GPT4OMINI] = overrides[MODEL_GPT4OMINI]
         else:
-            members["gpt-4o-mini"] = await _retry_call(lambda: _call_gpt4omini(symbol, payload), "gpt-4o-mini")
+            members[MODEL_GPT4OMINI] = await _retry_call(lambda: _call_gpt4omini(symbol, payload), MODEL_GPT4OMINI)
     except (LLMClientError, Exception) as exc:  # noqa: BLE001
         LOGGER.warning("front_gate gpt-4o-mini failed: %s", exc)
-        members["gpt-4o-mini"] = ModelDecision(
-            model_name="gpt-4o-mini",
+        members[MODEL_GPT4OMINI] = ModelDecision(
+            model_name=MODEL_GPT4OMINI,
             bias="abstain",
             confidence=0.0,
             raw_response={"error": str(exc)},
@@ -161,21 +161,21 @@ async def decide_front_gate(
 
     # GLM-4.5V
     try:
-        if overrides and "glm-4.5-air" in overrides:
-            members["glm-4.5-air"] = overrides["glm-4.5-air"]
+        if overrides and MODEL_GLM in overrides:
+            members[MODEL_GLM] = overrides[MODEL_GLM]
         else:
-            members["glm-4.5-air"] = await _retry_call(lambda: _call_glm45v(symbol, payload), "glm-4.5-air")
+            members[MODEL_GLM] = await _retry_call(lambda: _call_glm45v(symbol, payload), MODEL_GLM)
     except (LLMClientError, Exception) as exc:  # noqa: BLE001
         LOGGER.warning("front_gate glm-4.5-air failed: %s", exc)
-        members["glm-4.5-air"] = ModelDecision(
-            model_name="glm-4.5-air",
+        members[MODEL_GLM] = ModelDecision(
+            model_name=MODEL_GLM,
             bias="abstain",
             confidence=0.0,
             raw_response={"error": str(exc)},
         )
 
-    m1 = members["gpt-4o-mini"]
-    m2 = members["glm-4.5-air"]
+    m1 = members[MODEL_GPT4OMINI]
+    m2 = members[MODEL_GLM]
 
     def _glm_fallback(payload: Dict[str, Any]) -> ModelDecision | None:
         glm_snapshot = payload.get("glm_filter_result") or {}
@@ -324,10 +324,10 @@ async def decide_with_committee(
 
     # GPT-4o-mini
     try:
-        if overrides and "gpt-4o-mini" in overrides:
-            members["gpt-4o-mini"] = overrides["gpt-4o-mini"]
+        if overrides and MODEL_GPT4OMINI in overrides:
+            members[MODEL_GPT4OMINI] = overrides[MODEL_GPT4OMINI]
         else:
-            members["gpt-4o-mini"] = await _call_gpt4omini(symbol, payload)
+            members[MODEL_GPT4OMINI] = await _call_gpt4omini(symbol, payload)
     except (LLMClientError, Exception) as exc:  # noqa: BLE001
         LOGGER.warning("committee gpt-4o-mini failed: %s", exc)
         members["gpt-4o-mini"] = ModelDecision(
@@ -339,10 +339,10 @@ async def decide_with_committee(
 
     # GLM-4.5-air
     try:
-        if overrides and "glm-4.5-air" in overrides:
-            members["glm-4.5-air"] = overrides["glm-4.5-air"]
+        if overrides and MODEL_GLM in overrides:
+            members[MODEL_GLM] = overrides[MODEL_GLM]
         else:
-            members["glm-4.5-air"] = await _call_glm45v(symbol, payload)
+            members[MODEL_GLM] = await _call_glm45v(symbol, payload)
     except (LLMClientError, Exception) as exc:  # noqa: BLE001
         LOGGER.warning("committee glm-4.5-air failed: %s", exc)
         members["glm-4.5-air"] = ModelDecision(
@@ -352,7 +352,7 @@ async def decide_with_committee(
             raw_response={"error": str(exc)},
         )
 
-    ordered = [members.get("deepseek"), members.get("gpt-4o-mini"), members.get("glm-4.5-air")]
+    ordered = [members.get("deepseek"), members.get(MODEL_GPT4OMINI), members.get(MODEL_GLM)]
     if any(m is None for m in ordered):
         raise RuntimeError("committee missing member decisions")
 

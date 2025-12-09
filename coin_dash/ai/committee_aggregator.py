@@ -2,14 +2,10 @@ from __future__ import annotations
 
 from typing import Dict, List
 
+from .committee_config import COMMITTEE_WEIGHTS
 from .committee_schemas import CommitteeDecision, ModelDecision
 
-
-WEIGHTS: Dict[str, float] = {
-    "deepseek": 0.5,
-    "gpt-4o-mini": 0.3,
-    "glm-4.5-air": 0.2,
-}
+WEIGHTS: Dict[str, float] = COMMITTEE_WEIGHTS
 
 
 def _bias_to_score(bias: str) -> int:
