@@ -27,7 +27,7 @@ def _conflict_level(score_abs: float) -> str:
 def aggregate_committee(decisions: List[ModelDecision]) -> CommitteeDecision:
     """
     根据三模型投票规则计算最终决策。
-    - 权重：deepseek=0.5, gpt-4o-mini=0.3, glm-4.5-air=0.2
+    - 权重：deepseek=0.5, gpt-4o-mini=0.3, qwen=0.2
     - bias 映射：long=+1, short=-1, no-trade=0
     - final_score = Σ(weight_i * mapped_bias_i)
     - |score| < 0.25 -> 分歧过大，返回 no-trade

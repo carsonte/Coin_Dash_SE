@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import json
 import logging
 from typing import Any, Dict, Optional, Tuple, List, TYPE_CHECKING
 from uuid import uuid4
 
 from .committee_aggregator import WEIGHTS, aggregate_committee
-from .committee_config import COMMITTEE_WEIGHTS, FRONT_WEIGHTS, MODEL_GLM, MODEL_GPT4OMINI
+from .committee_config import COMMITTEE_WEIGHTS, FRONT_WEIGHTS, MODEL_GPT4OMINI, MODEL_QWEN
 from .committee_schemas import CommitteeDecision, ModelDecision
-from ..llm_clients import LLMClientError, call_glm45v, call_gpt4omini
+from ..llm_clients import LLMClientError, call_gpt4omini, call_qwen
 from .models import Decision
 from ..db.ai_decision_logger import AIDecisionLogger
 if TYPE_CHECKING:
@@ -89,17 +88,16 @@ async def _call_gpt4omini(symbol: str, payload: Dict[str, Any], client_kwargs: O
     return _parse_llm_json(text, "gpt-4o-mini")
 
 
-async def _call_glm45v(symbol: str, payload: Dict[str, Any], client_kwargs: Optional[Dict[str, Any]] = None) -> ModelDecision:
+async def _call_qwen(symbol: str, payload: Dict[str, Any], client_kwargs: Optional[Dict[str, Any]] = None) -> ModelDecision:
     messages = _build_messages(symbol, payload, role_hint="结构官")
     kwargs = dict(client_kwargs or {})
-    model_name = kwargs.pop("model", None) or os.getenv("GLM_MODEL") or os.getenv("ZHIPUAI_MODEL") or "glm-4.5-air"
-    resp = await call_glm45v(messages, model=model_name, max_tokens=256, **kwargs)
+    resp = await call_qwen(messages, max_tokens=256, **kwargs)
     text = ""
     if isinstance(resp, dict):
         choices = resp.get("choices") or []
         if choices and isinstance(choices[0], dict):
             text = str((choices[0].get("message") or {}).get("content") or "")
-    return _parse_llm_json(text, model_name)
+    return _parse_llm_json(text, MODEL_QWEN)
 
 
 def _decision_to_member(decision: Decision, model_name: str = "deepseek") -> ModelDecision:
@@ -122,7 +120,7 @@ def _decision_to_member(decision: Decision, model_name: str = "deepseek") -> Mod
     )
 
 
-FRONT_WEIGHTS: Dict[str, float] = {MODEL_GPT4OMINI: 0.6, MODEL_GLM: 0.4}
+FRONT_WEIGHTS: Dict[str, float] = {MODEL_GPT4OMINI: 0.6, MODEL_QWEN: 0.4}
 
 
 async def decide_front_gate(
@@ -132,11 +130,10 @@ async def decide_front_gate(
     overrides: Optional[Dict[str, ModelDecision]] = None,
     llm_cfg: Optional["LLMClientsCfg"] = None,
 ) -> CommitteeDecision:
-    f"""前置双模型委员会（gpt-4o-mini + {MODEL_GLM}），决定是否调用 DeepSeek。"""
+    f"""前置双模型委员会（gpt-4o-mini + {MODEL_QWEN}），决定是否调用 DeepSeek。"""
     members: Dict[str, ModelDecision] = {}
     committee_id = uuid4().hex
-    glm_cfg: Optional["LLMEndpointCfg"] = llm_cfg.glm if llm_cfg else None
-    glm_fallback: Optional["LLMEndpointCfg"] = llm_cfg.glm_fallback if llm_cfg else None
+    glm_cfg: Optional["LLMEndpointCfg"] = getattr(llm_cfg, "qwen", None) if llm_cfg else None
     gpt_cfg: Optional["LLMEndpointCfg"] = llm_cfg.gpt4omini if llm_cfg else None
 
     gpt_kwargs: Dict[str, Any] = {}
@@ -149,18 +146,6 @@ async def decide_front_gate(
             gpt_kwargs["model"] = gpt_cfg.model
 
     glm_kwargs: Dict[str, Any] = {}
-    if glm_cfg:
-        if glm_cfg.api_key:
-            glm_kwargs["api_key"] = glm_cfg.api_key
-        if glm_cfg.api_base:
-            glm_kwargs["api_base"] = glm_cfg.api_base
-        if glm_cfg.model:
-            glm_kwargs["model"] = glm_cfg.model
-    if glm_fallback:
-        if glm_fallback.api_key:
-            glm_kwargs["fallback_api_key"] = glm_fallback.api_key
-        if glm_fallback.api_base:
-            glm_kwargs["fallback_api_base"] = glm_fallback.api_base
 
     async def _retry_call(fn, name: str) -> ModelDecision:
         attempts = 3
@@ -195,38 +180,37 @@ async def decide_front_gate(
             raw_response={"error": str(exc)},
         )
 
-    # GLM-4.5V
+    # Qwen
     try:
-        if overrides and MODEL_GLM in overrides:
-            members[MODEL_GLM] = overrides[MODEL_GLM]
+        if overrides and MODEL_QWEN in overrides:
+            members[MODEL_QWEN] = overrides[MODEL_QWEN]
         else:
-            members[MODEL_GLM] = await _retry_call(
-                lambda: _call_glm45v(symbol, payload, client_kwargs=glm_kwargs), MODEL_GLM
+            members[MODEL_QWEN] = await _retry_call(
+                lambda: _call_qwen(symbol, payload, client_kwargs=glm_kwargs), MODEL_QWEN
             )
     except (LLMClientError, Exception) as exc:  # noqa: BLE001
-        LOGGER.warning("front_gate %s failed: %s", MODEL_GLM, exc)
-        members[MODEL_GLM] = ModelDecision(
-            model_name=MODEL_GLM,
+        LOGGER.warning("front_gate %s failed: %s", MODEL_QWEN, exc)
+        members[MODEL_QWEN] = ModelDecision(
+            model_name=MODEL_QWEN,
             bias="abstain",
             confidence=0.0,
             raw_response={"error": str(exc)},
         )
 
     m1 = members[MODEL_GPT4OMINI]
-    m2 = members[MODEL_GLM]
+    m2 = members[MODEL_QWEN]
 
     def _glm_fallback(payload: Dict[str, Any]) -> ModelDecision | None:
         glm_snapshot = payload.get("glm_filter_result") or {}
         should_call = bool(glm_snapshot.get("should_call_deepseek", False))
-        # glm_filter 只有“是否值得调用 DeepSeek”，没有方向，用 long 作为“放行”的占位
         bias = "long" if should_call else "no-trade"
         conf = float(glm_snapshot.get("confidence") or 0.6 if should_call else 0.0)
         return ModelDecision(
-            model_name="glm-filter-fallback",
+            model_name="prefilter-fallback",
             bias=bias,
             confidence=max(0.0, min(1.0, conf)),
             raw_response=glm_snapshot,
-            meta={"source": "glm_filter_fallback"},
+            meta={"source": "prefilter_fallback"},
         )
 
     available: List[ModelDecision] = [md for md in (m1, m2) if md.bias != "abstain"]
@@ -235,7 +219,7 @@ async def decide_front_gate(
         fb = _glm_fallback(payload)
         if fb:
             available.append(fb)
-            members["glm-filter-fallback"] = fb
+            members["prefilter-fallback"] = fb
             fallback_used = True
 
     final_decision = "no-trade"
@@ -335,16 +319,15 @@ async def decide_with_committee(
     llm_cfg: Optional["LLMClientsCfg"] = None,
 ) -> Tuple[CommitteeDecision, Optional[Decision]]:
     """
-    并行调用 DeepSeek / GPT-4o-mini / GLM-4.5-air，聚合为委员会决策。
+    并行调用 DeepSeek / GPT-4o-mini / Qwen，聚合为委员会决策。
     - overrides 可用于测试，直接提供 ModelDecision 替换真实调用。
     """
     members: Dict[str, ModelDecision] = {}
     committee_id = uuid4().hex
     logger = ai_logger or getattr(deepseek_client, "ai_logger", None)
     ds_primary: Optional[Decision] = None
-    glm_cfg: Optional["LLMEndpointCfg"] = llm_cfg.glm if llm_cfg else None
-    glm_fallback: Optional["LLMEndpointCfg"] = llm_cfg.glm_fallback if llm_cfg else None
     gpt_cfg: Optional["LLMEndpointCfg"] = llm_cfg.gpt4omini if llm_cfg else None
+    glm_cfg: Optional["LLMEndpointCfg"] = getattr(llm_cfg, "qwen", None) if llm_cfg else None
     gpt_kwargs: Dict[str, Any] = {}
     if gpt_cfg:
         if gpt_cfg.api_key:
@@ -361,12 +344,6 @@ async def decide_with_committee(
             glm_kwargs["api_base"] = glm_cfg.api_base
         if glm_cfg.model:
             glm_kwargs["model"] = glm_cfg.model
-    if glm_fallback:
-        if glm_fallback.api_key:
-            glm_kwargs["fallback_api_key"] = glm_fallback.api_key
-        if glm_fallback.api_base:
-            glm_kwargs["fallback_api_base"] = glm_fallback.api_base
-
     # DeepSeek (同步客户端，放线程池)
     try:
         if overrides and "deepseek" in overrides:
@@ -401,22 +378,22 @@ async def decide_with_committee(
             raw_response={"error": str(exc)},
         )
 
-    # GLM-4.5-air
+    # Qwen
     try:
-        if overrides and MODEL_GLM in overrides:
-            members[MODEL_GLM] = overrides[MODEL_GLM]
+        if overrides and MODEL_QWEN in overrides:
+            members[MODEL_QWEN] = overrides[MODEL_QWEN]
         else:
-            members[MODEL_GLM] = await _call_glm45v(symbol, payload, client_kwargs=glm_kwargs)
+            members[MODEL_QWEN] = await _call_qwen(symbol, payload, client_kwargs=glm_kwargs)
     except (LLMClientError, Exception) as exc:  # noqa: BLE001
-        LOGGER.warning("committee %s failed: %s", MODEL_GLM, exc)
-        members[MODEL_GLM] = ModelDecision(
-            model_name=MODEL_GLM,
+        LOGGER.warning("committee %s failed: %s", MODEL_QWEN, exc)
+        members[MODEL_QWEN] = ModelDecision(
+            model_name=MODEL_QWEN,
             bias="no-trade",
             confidence=0.0,
             raw_response={"error": str(exc)},
         )
 
-    ordered = [members.get("deepseek"), members.get(MODEL_GPT4OMINI), members.get(MODEL_GLM)]
+    ordered = [members.get("deepseek"), members.get(MODEL_GPT4OMINI), members.get(MODEL_QWEN)]
     if any(m is None for m in ordered):
         raise RuntimeError("committee missing member decisions")
 

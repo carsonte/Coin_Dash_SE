@@ -37,9 +37,9 @@ import "../table.css";
 
 const { RangePicker } = DatePicker;
 const modelOptions = [
-  { label: "DeepSeek", value: "DeepSeek" },
+  { label: "deepseek", value: "deepseek" },
   { label: "gpt-4o-mini", value: "gpt-4o-mini" },
-  { label: "glm-4.5-air", value: "glm-4.5-air" },
+  { label: "qwen", value: "qwen" },
   { label: "committee", value: "committee" },
 ];
 

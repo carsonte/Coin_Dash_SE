@@ -1,116 +1,73 @@
 Coin Dash · AI 自主决策 SE
 =========================
 
-概述
+概览
 ----
-Coin Dash 是一套多周期数字货币交易助手，彻底放开人工规则，由 DeepSeek（或 Mock）直接给出开仓/止盈/止损/RR/仓位。系统负责数据清洗、校验、记忆记录、纸盘同步与通知推送，并在 Prompt 中附带“反追涨杀跌”护栏（突破/反转二次确认，噪声区间禁止追价）。
+Coin Dash 是一套多周期数字货币/黄金的自动化交易决策链，核心思路是“AI 全权 + 多模型委员会 + 数据与执行安全带”。系统负责数据管线、特征提取、决策记录、纸盘/实盘同步与通知；模型只产出方向/价格/风控 JSON，避免手工规则干扰。
 
 近期更新
 --------
-- **B1 前置委员会（默认开启）**：`enable_multi_model_committee` 现在表示轻量双模型前置门卫（gpt-4o-mini 0.6 + glm-4.5-air 0.4，经 ezworkapi 代理），只决定“要不要叫 DeepSeek”。冲突或置信度 < 0.55 一律 `no-trade`，通过则写入 `committee_front`/`committee_id` 元信息后再让 DeepSeek 生成执行方案。
-- **前置否决理由更清晰**：当 B1 拦截时，返回观望并在 reason 中写明两模型的结论与置信度（例：`前置委员会否决: no-trade conf=0.52 gpt-4o-mini:no-trade;glm-4.5-air:no-trade`），卡片/日志能直接看到未调用 DeepSeek 的原因。
-- **前置模型容错**：每个模型调用失败会重试 3 次，仍失败则记为弃权；仅一票成功时采用该票结论；两票都失败时用 `glm_filter_result` 临时投票决定是否放行 DeepSeek，尽量避免因模型不可用而卡死。
-- **LLM 客户端**：新增 Aizex `gpt-4o-mini`、`glm-4.5-air`（ezworkapi）客户端；`.env` 增加 `AIZEX_API_KEY`/`AIZEX_API_BASE`、`GLM_API_KEY`/`GLM_API_BASE`，提供 `scripts/smoke_llm_clients.py` 冒烟脚本。
-- **决策持久化/接口**：`ai_decisions` 记录 `model_name`/`committee_id`/`weight`/`is_final`，前置委员会会落一条 `committee_front` 总结，成员各一条；API `/api/decisions` 支持按 `committee_id`/`model_name` 过滤并返回新字段（向后兼容）。
-- **DeepSeek 提示词（执行官模式）**：角色简化为“执行交易员”，信任 GLM 预过滤 + 前置委员会共识，不再反复判断大环境；只输出 JSON 方案（方向/入场/止损/止盈/仓位/风险评分），允许在结构一般时给出轻仓试探而不是过度观望。
-- **MT5 实时行情**：新增 `mt5_api` 数据源（默认启用），从 MT5 API 拉取 `/ohlc`、`/price`；tick_volume → volume，秒级时间戳升序。`data.provider` 可切换回 `ccxt`。
-- **GLM 双线路兜底**：前置/预过滤支持主线路失败时切换备用线路。主线路用 `GLM_API_KEY`/`GLM_API_BASE`（或 `ZHIPUAI_API_KEY`/`ZHIPUAI_API_BASE`），默认指向第三方 `https://api.ezworkapi.top/v1/chat/completions`；可选备用：`GLM_FALLBACK_API_KEY`/`GLM_FALLBACK_API_BASE`、`ZHIPU_FALLBACK_API_KEY`/`ZHIPU_FALLBACK_API_BASE`。
-- **符号切换**：默认符号改为 MT5 合约 `BTCUSDm`、`ETHUSDm`，并新增黄金 `XAUUSDm`（可在 `config.live.symbols` 直接跑多品种），live/backtest 示例命令同步更新。
-- **成交价来源**：PaperBroker 开仓价使用最新 bid/ask（多头用 ask，空头用 bid），确保模拟成交贴合盘口。
-- **GLM 预过滤升级**：预过滤输出结构化 `GlmFilterResult`（趋势一致性/波动/结构位置/形态候选/危险标签），按“市场状态过滤器 + 成本守门人”规则挡掉趋势冲突、ATR 极端、结构中轴/缺失、无形态候选、whipsaw/流动性差；`glm_filter.on_error` 可选 `call_deepseek/hold` 兜底；若预过滤自身出错，会尝试调用前置模型的 GLM 路线临时给出放行/否决判断。
-- **飞书推送验证**：`LARK_WEBHOOK` 写入 `.env` 后，可用 `python -m coin_dash.cli cards-test --symbol BTCUSDm` 快速发送测试卡片验证 webhook。
-- **黄金休盘检测**：`XAUUSDm` 若 bid/ask 缺失或最新 tick 超 180s 判定休盘，跳过 K 线/特征/DeepSeek/信号/纸盘；恢复有新 tick 后自动继续。
+- 多模型委员会：默认开启 `enable_multi_model_committee`，DeepSeek + gpt-4o-mini（Aizex）+ Qwen 共同投票；DeepSeek 权重最高（0.5），gpt-4o-mini 0.3，Qwen 0.2，可在开关关闭时回退到单 DeepSeek。
+- 前置双模型门卫（B1）：gpt-4o-mini 0.6 + Qwen 0.4 快速判定“要不要走 DeepSeek”，冲突或低置信度直接 `no-trade`，理由会写入决策元信息。
+- 预过滤改为 Qwen：`ai/filter_adapter.py` 使用 Qwen 轻量判定是否值得进入后续链路（失败自动放行），配置使用 `QWEN_API_KEY/QWEN_API_BASE/QWEN_MODEL`。
+- LLM 客户端：新增 `call_gpt4omini`（Aizex）与 `call_qwen`；`scripts/smoke_llm_clients.py` 提供连通性冒烟；缺 Key 时测试自动跳过。
+- 决策持久化：`ai_decisions` 记录增加 `model_name/committee_id/weight/is_final`，会落三条模型记录 + 一条委员会最终结果（或前置委员会总结）。
+- 日志/前端：日志页支持按 deepseek/gpt-4o-mini/qwen/committee 过滤，run_id 与 committee_id 关联查询。
+- MT5 行情源：默认启用 `mt5_api`（/price /ohlc），tick_volume 替换 volume，时间戳按秒对齐。
+- 测试现状：`python -m pytest --disable-warnings` 全量通过；若需加载 .env，可用 `python -m dotenv run -- python -m pytest tests/test_llm_clients_smoke.py --disable-warnings --maxfail=1` 运行 LLM 冒烟。
 
-核心特性
---------
-- **AI 全权决策**：关闭活跃度/静默/顺逆势等限制，AI 输出即执行，`position_size` 直用。
-- **反追涨杀跌护栏**：突破不得追第一根、回撤不砍第一根；chaotic/ranging/noise 高时禁止追价。
-- **多周期输入**：30m/1h/4h/1d 特征 + 30m/1h/4h 原始 `recent_ohlc`，包含环境标签与全局温度。
-- **提示特征**：`breakout_confirmed_*`/`momentum_decay_*`/`range_midzone_*` 仅用于 Prompt 引导。
-- **纸盘联动**：实盘信号/止盈/止损/复评同步 `PaperBroker`，30m 内冷却一单。
-- **复评与记忆**：保留 48h/10 轮上下文与跨币种共享事件，记录开仓、模式切换、复评、退出摘要。
-- **通知**：飞书信号卡/观望/复评/退出/绩效卡，支持 DB 记录信号/行情/绩效。
-- **GLM-4.5-air 预过滤层**：DeepSeek 前轻量判定是否需要调用，强触发（>0.3% 价格波动、结构突破、ATR 扩张、EMA 翻转、持仓 ±0.5 ATR 偏离）直接放行。
-
-决策流程（实盘/回测共用）
-------------------------
-1. 数据管线：`data/pipeline.py` 重采样 30m/1h/4h/1d，生成对齐窗口。
-2. 特征与结构：`features/multi_timeframe.py` 产出指标/确认提示；`features/structure.py` 识别支撑/阻力；`features/market_mode.py` 检测市场模式；`features/trend.py` 计算趋势评分。
-3. 预过滤：`ai/filter_adapter.py` 调用 GLM-4.5-air（ezworkapi）判定是否需要 DeepSeek（失败自动放行；should_call_deepseek=False 直接跳过当次决策）。
-4. 前置双模型委员会（B1）：`ai/committee_engine.py` 用 gpt-4o-mini + glm-4.5-air 做“要不要叫 DeepSeek”的前置投票，冲突/低置信度直接 `no-trade`；通过时写入 `committee_front`/`committee_id` 供后续参考。
-5. DeepSeek 执行官：`ai/deepseek_adapter.py` 组织上下文（含 GLM/committee_front），向 DeepSeek 请求执行方案 JSON，不再与其它模型投票。
-6. 兜底与校验：`ai/safe_fallback.py` 检查价格顺序/RR，`verify/validator.py` 做基本合法性校验。
-7. 执行与同步：`runtime/orchestrator.py` 写入 `StateManager`，推送飞书卡，记录共享记忆，同步纸盘并执行冷却。
-8. 回测：`backtest/engine.py` 复用同一决策链（GLM 预过滤 + B1 前置门卫 + DeepSeek 执行官），`exec/paper.py` 撮合并统计绩效。
-
-运行方式
---------
-1. 安装依赖（Python 3.10+）
-   ```bash
-   pip install -r requirements.txt  # 或按 pyproject/poetry.lock 安装
-   ```
-2. 配置环境  
-   - 复制 `.env.example` 为 `.env`，至少设置 `DEEPSEEK_API_KEY`。  
-   - 飞书通知：`LARK_WEBHOOK`、`LARK_SIGNING_SECRET`（可选）。  
-   - 预过滤：`ZHIPUAI_API_KEY`（可选 `ZHIPUAI_API_BASE`），未配置时自动放行 DeepSeek。  
-   - 数据源：`config/config.yaml` 里 `data.provider` 可选 `mt5_api`（默认）或 `ccxt`；MT5 API 需设置 `data.mt5_api.base_url`，符号使用 MT5 合约名（如 `BTCUSDm`、`ETHUSDm`、`XAUUSDm`）。  
-   - Live 多品种：`config.live.symbols` 可定义 live 默认品种（示例：`BTCUSDm`,`ETHUSDm`,`XAUUSDm`）；CLI `--symbols` 会覆盖。  
-   - 其它参数见 `config/config.yaml`（时间框架、数据源、DeepSeek、数据库、日志、安全模式等）。
-3. 命令示例  
-   - 回测：`python -m coin_dash.cli backtest --symbol BTCUSDm --csv data/sample/BTCUSDT_30m_2025-10_11.csv --deepseek`  
-   - 实时单次：`python -m coin_dash.cli live --symbols BTCUSDm`  
-   - 循环实时：`python -m coin_dash.cli live --symbols BTCUSDm,ETHUSDm --loop`  
-   - 飞书卡片自检：`python -m coin_dash.cli cards-test --symbol BTCUSDm`  
-   - 一键平仓：`python -m coin_dash.cli close-all --symbols BTCUSDm,ETHUSDm`
+决策流程（不讲代码）
+------------------
+1. 数据与特征：管线按 30m/1h/4h/1d 采样行情，生成多周期特征、结构、趋势、市场模式标签，并附近期 OHLC 片段。
+2. 预过滤（Qwen）：快速判断当次行情是否值得深度推理。失败默认放行；明确给出 `should_call_deepseek=False` 时跳过本轮。
+3. 前置门卫（B1）：gpt-4o-mini + Qwen 小委员会投票是否调用 DeepSeek，冲突或置信度不足直接返回 `no-trade`，同时写入 `committee_front` 元信息。
+4. 深度决策与终局委员会：DeepSeek 产出结构化执行方案；若开启多模型委员会，再由 DeepSeek + gpt-4o-mini + Qwen 复核投票，输出最终方向/置信度/冲突等级。
+5. 安全检查：基础合法性与安全兜底（价格顺序、RR 下限等）。
+6. 执行与同步：写入 StateManager，推送飞书卡片，记录共享记忆；纸盘/实盘按配置同步持仓与复评。
+7. 回测：与实盘共用同一决策链（含预过滤/前置门卫/委员会），用模拟撮合统计绩效。
 
 配置要点
 --------
-- **时间框架**：默认快周期 30m、慢周期 1h，附 4h/1d 供趋势与结构参考。  
-- **信号冷却**：`signals.cooldown_minutes` 用于同向冷却（实盘纸盘同步）。  
-- **复评**：`signals.review_interval_minutes`、`signals.review_price_atr` 控制定期/逆向波动触发复评。  
-- **安全模式**：`performance.safe_mode` 可设置连续止损阈值（默认关闭）。  
-- **通知**：`notifications` 中配置飞书 webhook 和签名秘钥。  
-- **数据库**：`database` 可开启/关闭 SQLite 或其它 DSN。  
-- **LLM 配置**：`llm` 块统一管理 glm/gpt-4o-mini 的 `api_base/api_key/model`（默认 glm 走 ezworkapi、gpt-4o-mini 走 Aizex），支持 `GLM_API_KEY/GLM_API_BASE/GLM_MODEL`、`GLM_FALLBACK_*`、`AIZEX_API_KEY/AIZEX_API_BASE` 等环境变量覆盖，预过滤/委员会/脚本共用。  
-- **预过滤 + DeepSeek 集成**：命中强触发直接进入 DeepSeek；GLM-4.5-air（ezworkapi）返回结构化 `GlmFilterResult`（trend_consistency、volatility_status、structure_relevance、pattern_candidate、danger_flags、should_call_deepseek）；挡掉趋势冲突/ATR 极端/结构中轴或缺失/无形态候选/whipsaw/低流动性等。`glm_filter.on_error` 控制失败兜底（call_deepseek/hold）。标签会被透传到 DeepSeek Prompt 的“GLM Market Filter”段，指示大环境无需重复判断、专注形态真假与入场/风控设计；危险标签（atr_extreme/low_liquidity/wick_noise 等）会提醒无持仓偏观望、复评优先控仓。观望卡会标注“GLM 预过滤（未调用 DeepSeek）”。  
-- **前置委员会 B1**：`enable_multi_model_committee` 控制 gpt-4o-mini + glm-4.5-air 前置门卫；冲突或置信度不足直接不叫 DeepSeek，通过时会把 `committee_front`/`committee_id` 写入决策元信息。  
-- **MT5 实时数据源**：`data.provider=mt5_api` 时，行情来自 MT5 API（`/price`、`/ohlc`），tick_volume → volume；K 线按秒级时间戳升序写入 pipeline/特征；PaperBroker 开仓价取最新 bid/ask（多头用 ask，空头用 bid），不再依赖 CCXT。
-- **本地事件触发层**：`event_triggers.enabled=true` 时，仅在检测到本地波动/均线翻转/结构突破等事件后才进入 GLM / DeepSeek；默认 false 保持现有流程，便于在盘整期节约模型调用。
-- **GLM 机会初筛器**：`glm_filter.enabled=true` 时，在调用 DeepSeek 前使用 GLM 快速判定是否值得继续；包含重试/超时/解析兜底，失败会放行 DeepSeek。
+- 环境变量：复制 `.env.example` 到 `.env`，至少设置  
+  - DeepSeek：`DEEPSEEK_API_KEY`（可选 `DEEPSEEK_API_BASE`）  
+  - gpt-4o-mini（Aizex）：`AIZEX_API_KEY`，`AIZEX_API_BASE`（Aizex 控制台给出的 base）  
+  - Qwen：`QWEN_API_KEY`，`QWEN_API_BASE`（默认 `https://api.ezworkapi.top/v1/chat/completions`），`QWEN_MODEL`（默认 `qwen-turbo-2025-07-15`）  
+  - 飞书：`LARK_WEBHOOK`（可选 `LARK_SIGNING_SECRET`）  
+  - 数据源：如使用 MT5，配置 `data.mt5_api.base_url`，符号用 MT5 合约名（`BTCUSDm`/`ETHUSDm`/`XAUUSDm`）
+- 开关：`enable_multi_model_committee` 控制是否使用三模型委员会；预过滤开关在 `config/config.yaml` 的 `glm_filter.enabled`（已切到 Qwen 实现，但保留字段名兼容）。
+- CLI 示例：  
+  - 回测：`python -m coin_dash.cli backtest --symbol BTCUSDm --csv data/sample/BTCUSDT_30m_2025-10_11.csv --deepseek`  
+  - 实时单次：`python -m coin_dash.cli live --symbols BTCUSDm`  
+  - 循环实时：`python -m coin_dash.cli live --symbols BTCUSDm,ETHUSDm --loop`  
+  - 飞书卡片自检：`python -m coin_dash.cli cards-test --symbol BTCUSDm`  
+  - 一键平仓：`python -m coin_dash.cli close-all --symbols BTCUSDm,ETHUSDm`
 
-目录索引
+目录速览
 --------
-- `coin_dash/data/` 数据拉取与重采样  
-- `coin_dash/features/` 特征、结构、市场模式  
-- `coin_dash/ai/` DeepSeek 适配、预过滤、模型定义、兜底  
-- `coin_dash/runtime/orchestrator.py` 实时调度、信号/复评/纸盘/通知  
-- `coin_dash/backtest/engine.py` 回测主循环  
-- `coin_dash/exec/paper.py` 纸盘撮合  
-- `coin_dash/notify/lark.py` 飞书卡片  
-- `coin_dash/state_manager.py` 状态与绩效  
-- `coin_dash/db/` 可选数据库接口
+- `coin_dash/data/` 数据拉取与重采样
+- `coin_dash/features/` 多周期特征、结构、趋势、市场模式
+- `coin_dash/ai/` DeepSeek 适配、预过滤（Qwen）、多模型委员会
+- `coin_dash/runtime/orchestrator.py` 实时调度、信号/复评/纸盘/通知
+- `coin_dash/backtest/engine.py` 回测主循环
+- `coin_dash/exec/paper.py` 纸盘撮合
+- `coin_dash/notify/lark.py` 飞书卡片
+- `coin_dash/state_manager.py` 状态与绩效
+- `coin_dash/db/` 数据库存取与决策持久化
+- `scripts/smoke_llm_clients.py` LLM 连通性冒烟脚本
 
 测试
 ----
-- 2025-11-24：`pytest --maxfail=1 --disable-warnings` · passed  
-- 预过滤层：GLM 异常/解析错误按 `glm_filter.on_error` 兜底（默认放行 DeepSeek）；GLM 标签在决策记录中以 `glm_snapshot` 保存，便于前端/日志展示
+- 全量：`python -m pytest --disable-warnings`（当前 15 项：13 通过，2 条 LLM 冒烟在缺 Key 时跳过）
+- LLM 冒烟（加载 .env）：`python -m dotenv run -- python -m pytest tests/test_llm_clients_smoke.py --disable-warnings --maxfail=1`
+- 冒烟脚本：`python -m dotenv run -- python scripts/smoke_llm_clients.py`
 
 注意
 ----
-- AI 全权决策需自行风控，可能带来较大收益波动。  
-- 数据缺失/价格为零会被过滤。  
-- 纸盘映射当前未跨进程持久化，如需重启续跑请自行保存或扩展持久化。  
-- risk/quality 仅作 Prompt 引导，不会阻塞执行链路。  
+- 模型决策直接影响交易，请自行做好风险控制与额度限制。
+- 数据缺口/无效价格会被过滤；预过滤失败会放行 DeepSeek。
+- 纸盘持久化暂未跨进程保留，如需长期运行请自行扩展。
 
 更多文档
 --------
-- 详见 `Coin Dash se.md` 获取流程细节、指标与目录说明。
-- GLM 预过滤结构与规则：`docs/glm_filter.md`
-
-日志前端与 API
----------------
-- 后端日志接口：`uvicorn coin_dash.api:app --reload --port 8000`，Swagger：`http://127.0.0.1:8000/docs`，支持 `/api/decisions`、`/api/system-events`、`/api/stats` 等（时间窗+分页）。
-- 前端日志面板：`cd frontend && npm install && npm run dev`，浏览器访问 `http://127.0.0.1:5173`；后端地址不同可在 `frontend/.env` 配置 `VITE_API_BASE`。
-- 表格布局：固定列宽、单行省略（摘要/描述悬浮 Tooltip 查看全文），行高统一；列示例（决策表）：时间160/品种100/类型100/置信度80/Tokens120/延迟120/摘要300/run_id120/操作80。
-- 使用建议：运行 live/backtest 时带 `--run-id`，便于前端筛选（未指定会自动生成 `hostname-<timestamp>`）；时间范围必填。
-- 预过滤（GLM）：`ZHIPUAI_API_KEY` 配置后启用，模型可由 `ZHIPUAI_MODEL` 指定（如 `glm-4.5-air`）；预过滤请求默认超时 8s，内置 2 次重试（总 3 次），失败 fallback 放行 DeepSeek。
+- `config/config.yaml`：关键参数示例
+- `docs/glm_filter.md`：预过滤结构说明（字段名沿用旧称，现由 Qwen 提供）

@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, ConfigDict
 class ModelDecision(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
-    model_name: str = Field(description='模型名称，如 "deepseek" / "gpt-4o-mini" / "glm-4.5-air"')
+    model_name: str = Field(description='模型名称，如 "deepseek" / "gpt-4o-mini" / "qwen"')
     bias: str = Field(description='交易倾向："long" / "short" / "no-trade"')
     confidence: float = Field(ge=0.0, le=1.0, description="模型内部置信度，0-1")
     entry: Optional[float] = Field(default=None, description="建议入场价")

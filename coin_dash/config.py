@@ -148,24 +148,22 @@ class EventTriggersCfg(BaseModel):
 
 class LLMEndpointCfg(BaseModel):
     api_key: str = ""
-    api_base: str = "https://api.ezworkapi.top/v1/chat/completions"
-    model: str = "glm-4.5-air"
-    fallback_api_key: str = ""
-    fallback_api_base: str = ""
+    api_base: str = "https://api.ezworkapi.top"
+    model: str = "qwen-turbo-2025-07-15"
     http_referer: str = ""
     http_title: str = ""
 
 
 class LLMClientsCfg(BaseModel):
-    glm: LLMEndpointCfg = Field(default_factory=LLMEndpointCfg)
-    glm_fallback: LLMEndpointCfg = Field(default_factory=LLMEndpointCfg)
+    glm: LLMEndpointCfg = Field(default_factory=LLMEndpointCfg)  # 兼容旧字段，实际指向 Qwen
+    glm_fallback: LLMEndpointCfg = Field(default_factory=LLMEndpointCfg)  # 兼容旧字段，可留空
     gpt4omini: LLMEndpointCfg = Field(
         default_factory=lambda: LLMEndpointCfg(api_key="", api_base="", model="gpt-4o-mini")
     )
 
 
 class AppConfig(BaseModel):
-    # 启用 B1 前置双模型委员会（gpt-4o-mini + glm-4.5-air），决定是否调用 DeepSeek
+    # 启用 B1 前置双模型委员会（gpt-4o-mini + qwen），决定是否调用 DeepSeek
     enable_multi_model_committee: bool = True
     symbols: List[str] = Field(default_factory=lambda: ["BTCUSDm", "ETHUSDm", "XAUUSDm"])
     timeframes: TimeframeCfg = Field(default_factory=TimeframeCfg)
@@ -197,18 +195,18 @@ def load_config(path: Optional[Path] = None) -> AppConfig:
     llm_cfg.setdefault("glm", {})
     llm_cfg.setdefault("glm_fallback", {})
     llm_cfg.setdefault("gpt4omini", {})
-    # 环境变量兼容：GLM/OPENROUTER/AIZEX
-    env_glm = os.getenv("GLM_API_KEY") or os.getenv("ZHIPUAI_API_KEY")
-    env_glm_base = os.getenv("GLM_API_BASE") or os.getenv("ZHIPUAI_API_BASE")
-    env_glm_model = os.getenv("GLM_MODEL") or os.getenv("ZHIPUAI_MODEL")
+    # 环境变量：QWEN/AIZEX（glm 字段兼容旧命名）
+    env_glm = os.getenv("QWEN_API_KEY") or os.getenv("GLM_API_KEY")
+    env_glm_base = os.getenv("QWEN_API_BASE") or os.getenv("GLM_API_BASE")
+    env_glm_model = os.getenv("QWEN_MODEL") or os.getenv("GLM_MODEL")
     if env_glm:
         llm_cfg["glm"]["api_key"] = env_glm
     if env_glm_base:
         llm_cfg["glm"]["api_base"] = env_glm_base
     if env_glm_model:
         llm_cfg["glm"]["model"] = env_glm_model
-    env_glm_fb = os.getenv("GLM_FALLBACK_API_KEY") or os.getenv("ZHIPU_FALLBACK_API_KEY")
-    env_glm_fb_base = os.getenv("GLM_FALLBACK_API_BASE") or os.getenv("ZHIPU_FALLBACK_API_BASE")
+    env_glm_fb = os.getenv("GLM_FALLBACK_API_KEY")
+    env_glm_fb_base = os.getenv("GLM_FALLBACK_API_BASE")
     if env_glm_fb:
         llm_cfg["glm_fallback"]["api_key"] = env_glm_fb
     if env_glm_fb_base:

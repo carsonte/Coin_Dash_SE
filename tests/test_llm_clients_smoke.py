@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from coin_dash.llm_clients import LLMClientError, call_glm45v, call_gpt4omini
+from coin_dash.llm_clients import LLMClientError, call_gpt4omini, call_qwen
 
 
 def _messages():
@@ -29,8 +29,8 @@ def test_gpt4omini_smoke():
     assert _has_message(resp)
 
 
-def test_glm45v_smoke():
-    if not os.getenv("GLM_API_KEY"):
-        pytest.skip("GLM_API_KEY not set")
-    resp = asyncio.run(call_glm45v(_messages()))
+def test_qwen_smoke():
+    if not (os.getenv("QWEN_API_KEY") and os.getenv("QWEN_API_BASE")):
+        pytest.skip("QWEN env not set")
+    resp = asyncio.run(call_qwen(_messages()))
     assert _has_message(resp)

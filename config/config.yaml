@@ -47,12 +47,10 @@ data:
     base_url: "http://43.156.27.55:5005"
 
 llm:
-  glm:
-    api_base: "https://api.ezworkapi.top/v1/chat/completions"
-    model: "glm-4.5-air"
-  glm_fallback:
-    api_base: "https://api.ezworkapi.top/v1/chat/completions"
-    model: "glm-4.5-air"
+  glm:  # 兼容命名，实际指向 Qwen
+    api_base: "https://api.ezworkapi.top"
+    model: "qwen-turbo-2025-07-15"
+  glm_fallback: {}
   gpt4omini:
     api_base: "https://aizex.top"
     model: "gpt-4o-mini"
@@ -103,7 +101,7 @@ signals:
 event_triggers:
   enabled: false              # 本地事件触发层：为 false 时保持现有行为；true 时无事件将跳过大模型调用
 glm_filter:
-  enabled: true               # GLM 预过滤层开关；false 时直接进入 DeepSeek（保持旧行为）
+  enabled: true               # Qwen 预过滤层开关；false 时直接进入 DeepSeek（保持旧行为）
   on_error: call_deepseek     # call_deepseek | hold：GLM 异常时的兜底策略
 
 deepseek:
@@ -158,5 +156,5 @@ log:
   level: DEBUG                # 日志级别
 
 # LLM 客户端环境变量提示（不在此文件中配置）：
-# - GLM_API_KEY / GLM_API_BASE（默认 https://api.ezworkapi.top/v1/chat/completions）
+# - QWEN_API_KEY / QWEN_API_BASE / QWEN_MODEL（默认 https://api.ezworkapi.top, qwen-turbo-2025-07-15）
 # - AIZEX_API_KEY / AIZEX_API_BASE（OpenAI 兼容，gpt-4o-mini）

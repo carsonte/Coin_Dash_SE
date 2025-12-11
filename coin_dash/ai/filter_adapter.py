@@ -6,8 +6,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 
-import requests
-from coin_dash.llm_clients import call_glm45v
+from coin_dash.llm_clients import call_qwen
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
@@ -77,7 +76,7 @@ class GlmFilterResult(BaseModel):
 
 class PreFilterClient:
     """
-    Market-state filter backed by GLM-4.5-air（ezworkapi）。
+    Market-state filter backed by Qwen（OpenAI 兼容接口）。
     - 输出结构化标签（趋势一致性、波动、结构位置、形态候选等）。
     - 按规则挡掉危险/垃圾行情，作为 DeepSeek 的成本守门人。
     """
@@ -86,47 +85,15 @@ class PreFilterClient:
         self,
         cfg: Optional["GLMFilterCfg"] = None,
         glm_client_cfg: Optional["LLMEndpointCfg"] = None,
-        glm_fallback_cfg: Optional["LLMEndpointCfg"] = None,
         api_key: Optional[str] = None,
         endpoint: Optional[str] = None,
     ) -> None:
         self.enabled = bool(getattr(cfg, "enabled", True))
         self.on_error = (getattr(cfg, "on_error", None) or "call_deepseek").lower()
-        self.api_key = (
-            api_key or (glm_client_cfg.api_key if glm_client_cfg else None) or os.getenv("GLM_API_KEY") or os.getenv("ZHIPUAI_API_KEY") or ""
-        )
-        self.model = (
-            (glm_client_cfg.model if glm_client_cfg else None)
-            or os.getenv("GLM_MODEL")
-            or os.getenv("ZHIPUAI_MODEL")
-            or "glm-4.5-air"
-        )
-        self.endpoint = (
-            endpoint
-            or (glm_client_cfg.api_base if glm_client_cfg else None)
-            or os.getenv("ZHIPUAI_API_BASE")
-            or "https://api.ezworkapi.top/v1/chat/completions"
-        ).rstrip("/")
-        fb_base_cfg = glm_fallback_cfg.api_base if glm_fallback_cfg else None
-        fb_key_cfg = glm_fallback_cfg.api_key if glm_fallback_cfg else None
-        self.fallback_base = (
-            fb_base_cfg
-            or os.getenv("ZHIPU_FALLBACK_API_BASE")
-            or os.getenv("ZHIPUAI_FALLBACK_API_BASE")
-            or "https://api.ezworkapi.top/v1/chat/completions"
-        ).rstrip("/")
-        self.fallback_key = (
-            fb_key_cfg or os.getenv("ZHIPU_FALLBACK_API_KEY") or os.getenv("ZHIPUAI_FALLBACK_API_KEY") or self.api_key
-        )
-        # OpenRouter 兼容：可选填 HTTP-Referer/X-Title（不填也能用）
-        self.extra_headers: Dict[str, str] = {}
-        referer = (glm_client_cfg.http_referer if glm_client_cfg else None) or os.getenv("ZHIPU_HTTP_REFERER") or os.getenv("OPENROUTER_HTTP_REFERER")
-        title = (glm_client_cfg.http_title if glm_client_cfg else None) or os.getenv("ZHIPU_HTTP_TITLE") or os.getenv("OPENROUTER_HTTP_TITLE")
-        if referer:
-            self.extra_headers["HTTP-Referer"] = referer
-        if title:
-            self.extra_headers["X-Title"] = title
-        self.session = requests.Session()
+        self.api_key = api_key or (glm_client_cfg.api_key if glm_client_cfg else None) or os.getenv("QWEN_API_KEY") or ""
+        self.model = (glm_client_cfg.model if glm_client_cfg else None) or os.getenv("QWEN_MODEL") or "qwen-turbo-2025-07-15"
+        self.endpoint = (endpoint or (glm_client_cfg.api_base if glm_client_cfg else None) or os.getenv("QWEN_API_BASE") or "https://api.ezworkapi.top").rstrip("/")
+        self.session = None
 
     def should_call_deepseek(
         self,
@@ -162,11 +129,7 @@ class PreFilterClient:
             data = self._parse_json(resp)
             glm_result = GlmFilterResult.from_response(data)
         except Exception as exc:  # noqa: BLE001
-            LOGGER.warning("glm_prefilter_error err=%s", exc)
-            # 兜底：尝试用前置模型的 GLM 路线做一次临时判断
-            fb = self._fallback_committee_glm(feature_context)
-            if fb:
-                return fb
+            LOGGER.warning("qwen_prefilter_error err=%s", exc)
             return self._fallback_on_error(str(exc))
         glm_result = self._apply_rules(glm_result, is_review=is_review, strong_triggers=strong)
         return glm_result
@@ -273,32 +236,27 @@ class PreFilterClient:
     def _chat_completion(self, payload: Dict[str, Any]) -> str:
         attempts = 3
         last_exc: Exception | None = None
-        candidates = [
-            (self.endpoint, self.api_key),
-        ]
-        if self.fallback_base and (self.fallback_base != self.endpoint or self.fallback_key != self.api_key):
-            candidates.append((self.fallback_base, self.fallback_key))
-
-        for base, key in candidates:
-            url = f"{base}"
-            headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-            headers.update(self.extra_headers)
-            for i in range(attempts):
-                try:
-                    resp = self.session.post(url, json=payload, headers=headers, timeout=8)
-                    resp.raise_for_status()
-                    data = resp.json()
-                    return data["choices"][0]["message"]["content"]
-                except requests.RequestException as exc:
-                    last_exc = exc
-                    if i < attempts - 1:
-                        continue
-                    break
-                except Exception as exc:  # noqa: BLE001
-                    last_exc = exc
-                    if i < attempts - 1:
-                        continue
-                    break
+        last_exc: Exception | None = None
+        for _ in range(attempts):
+            try:
+                resp = asyncio.run(
+                    call_qwen(
+                        payload.get("messages") or [],
+                        api_key=self.api_key,
+                        api_base=self.endpoint,
+                        model=self.model,
+                        request_timeout=8,
+                        temperature=payload.get("temperature", 0),
+                    )
+                )
+                if isinstance(resp, dict):
+                    choices = resp.get("choices") or []
+                    if choices and isinstance(choices[0], dict):
+                        return str((choices[0].get("message") or {}).get("content") or "")
+                raise ValueError("qwen_prefilter_empty_response")
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                continue
         if last_exc:
             raise last_exc
 
@@ -408,67 +366,6 @@ class PreFilterClient:
             volatility_status="normal",
             structure_relevance="structure_missing",
             pattern_candidate="none",
-            danger_flags=["glm_error"],
-            failed_conditions=["glm_error"],
+            danger_flags=["prefilter_error"],
+            failed_conditions=["prefilter_error"],
         )
-
-    def _fallback_committee_glm(self, feature_context: Dict[str, Any]) -> Optional[GlmFilterResult]:
-        """当预过滤失败时，复用前置模型的 GLM 路线做临时放行判断。"""
-        api_key = os.getenv("GLM_API_KEY") or self.fallback_key
-        base = os.getenv("GLM_API_BASE") or self.fallback_base
-        if not api_key or not base:
-            return None
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "你是预过滤兜底助手，只返回 JSON："
-                    '{"bias":"long|short|no-trade","confidence":0-1}. '
-                    "bias!=no-trade 表示允许继续调用 DeepSeek。"
-                ),
-            },
-            {
-                "role": "user",
-                "content": json.dumps({"features": feature_context}, ensure_ascii=False),
-            },
-        ]
-        try:
-            resp = asyncio.run(
-                call_glm45v(
-                    messages,
-                    model=self.model,
-                    request_timeout=8,
-                    api_base=base,
-                    api_key=api_key,
-                    fallback_api_key=self.fallback_key,
-                    fallback_api_base=self.fallback_base,
-                )
-            )
-            bias = "no-trade"
-            confidence = 0.0
-            if isinstance(resp, dict):
-                choices = resp.get("choices") or []
-                if choices and isinstance(choices[0], dict):
-                    msg = choices[0].get("message") or {}
-                    content = str(msg.get("content") or "")
-                    try:
-                        data = json.loads(content)
-                        bias = str(data.get("bias") or "no-trade").lower()
-                        confidence = float(data.get("confidence") or 0.0)
-                    except Exception:
-                        pass
-            allow = bias in ("long", "short")
-            return GlmFilterResult(
-                should_call_deepseek=allow,
-                reason=f"fallback_committee_glm:{bias}",
-                trend_consistency="weak",
-                volatility_status="normal",
-                structure_relevance="structure_missing",
-                pattern_candidate="none",
-                danger_flags=["glm_error"],
-                met_conditions=["fallback_committee_glm"] if allow else [],
-                failed_conditions=["fallback_committee_glm_blocked"] if not allow else [],
-            )
-        except Exception as exc:  # noqa: BLE001
-            LOGGER.warning("fallback_committee_glm_error err=%s", exc)
-            return None
