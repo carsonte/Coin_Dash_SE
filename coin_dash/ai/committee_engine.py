@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import json
 import logging
 from typing import Any, Dict, Optional, Tuple, List, TYPE_CHECKING
@@ -90,14 +91,15 @@ async def _call_gpt4omini(symbol: str, payload: Dict[str, Any], client_kwargs: O
 
 async def _call_glm45v(symbol: str, payload: Dict[str, Any], client_kwargs: Optional[Dict[str, Any]] = None) -> ModelDecision:
     messages = _build_messages(symbol, payload, role_hint="结构官")
-    kwargs = client_kwargs or {}
-    resp = await call_glm45v(messages, model="glm-4.5-air", max_tokens=256, **kwargs)
+    kwargs = dict(client_kwargs or {})
+    model_name = kwargs.pop("model", None) or os.getenv("GLM_MODEL") or os.getenv("ZHIPUAI_MODEL") or "glm-4.5-air"
+    resp = await call_glm45v(messages, model=model_name, max_tokens=256, **kwargs)
     text = ""
     if isinstance(resp, dict):
         choices = resp.get("choices") or []
         if choices and isinstance(choices[0], dict):
             text = str((choices[0].get("message") or {}).get("content") or "")
-    return _parse_llm_json(text, "glm-4.5-air")
+    return _parse_llm_json(text, model_name)
 
 
 def _decision_to_member(decision: Decision, model_name: str = "deepseek") -> ModelDecision:
@@ -120,7 +122,7 @@ def _decision_to_member(decision: Decision, model_name: str = "deepseek") -> Mod
     )
 
 
-FRONT_WEIGHTS: Dict[str, float] = {"gpt-4o-mini": 0.6, "glm-4.5-air": 0.4}
+FRONT_WEIGHTS: Dict[str, float] = {MODEL_GPT4OMINI: 0.6, MODEL_GLM: 0.4}
 
 
 async def decide_front_gate(
@@ -130,7 +132,7 @@ async def decide_front_gate(
     overrides: Optional[Dict[str, ModelDecision]] = None,
     llm_cfg: Optional["LLMClientsCfg"] = None,
 ) -> CommitteeDecision:
-    """前置双模型委员会（gpt-4o-mini + glm-4.5-air），决定是否调用 DeepSeek。"""
+    f"""前置双模型委员会（gpt-4o-mini + {MODEL_GLM}），决定是否调用 DeepSeek。"""
     members: Dict[str, ModelDecision] = {}
     committee_id = uuid4().hex
     glm_cfg: Optional["LLMEndpointCfg"] = llm_cfg.glm if llm_cfg else None
@@ -202,7 +204,7 @@ async def decide_front_gate(
                 lambda: _call_glm45v(symbol, payload, client_kwargs=glm_kwargs), MODEL_GLM
             )
     except (LLMClientError, Exception) as exc:  # noqa: BLE001
-        LOGGER.warning("front_gate glm-4.5-air failed: %s", exc)
+        LOGGER.warning("front_gate %s failed: %s", MODEL_GLM, exc)
         members[MODEL_GLM] = ModelDecision(
             model_name=MODEL_GLM,
             bias="abstain",
@@ -406,7 +408,7 @@ async def decide_with_committee(
         else:
             members[MODEL_GLM] = await _call_glm45v(symbol, payload, client_kwargs=glm_kwargs)
     except (LLMClientError, Exception) as exc:  # noqa: BLE001
-        LOGGER.warning("committee glm-4.5-air failed: %s", exc)
+        LOGGER.warning("committee %s failed: %s", MODEL_GLM, exc)
         members[MODEL_GLM] = ModelDecision(
             model_name=MODEL_GLM,
             bias="no-trade",

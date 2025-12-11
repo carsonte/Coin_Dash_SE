@@ -92,13 +92,20 @@ class PreFilterClient:
     ) -> None:
         self.enabled = bool(getattr(cfg, "enabled", True))
         self.on_error = (getattr(cfg, "on_error", None) or "call_deepseek").lower()
-        self.api_key = api_key or (glm_client_cfg.api_key if glm_client_cfg else None) or os.getenv("ZHIPUAI_API_KEY") or ""
-        self.model = (glm_client_cfg.model if glm_client_cfg else None) or os.getenv("ZHIPUAI_MODEL") or "glm-4.5-air"
+        self.api_key = (
+            api_key or (glm_client_cfg.api_key if glm_client_cfg else None) or os.getenv("GLM_API_KEY") or os.getenv("ZHIPUAI_API_KEY") or ""
+        )
+        self.model = (
+            (glm_client_cfg.model if glm_client_cfg else None)
+            or os.getenv("GLM_MODEL")
+            or os.getenv("ZHIPUAI_MODEL")
+            or "glm-4.5-air"
+        )
         self.endpoint = (
             endpoint
             or (glm_client_cfg.api_base if glm_client_cfg else None)
             or os.getenv("ZHIPUAI_API_BASE")
-            or "https://api.ezworkapi.top/api/paas/v4/chat/completions"
+            or "https://api.ezworkapi.top/v1/chat/completions"
         ).rstrip("/")
         fb_base_cfg = glm_fallback_cfg.api_base if glm_fallback_cfg else None
         fb_key_cfg = glm_fallback_cfg.api_key if glm_fallback_cfg else None
@@ -106,7 +113,7 @@ class PreFilterClient:
             fb_base_cfg
             or os.getenv("ZHIPU_FALLBACK_API_BASE")
             or os.getenv("ZHIPUAI_FALLBACK_API_BASE")
-            or "https://api.ezworkapi.top/api/paas/v4/chat/completions"
+            or "https://api.ezworkapi.top/v1/chat/completions"
         ).rstrip("/")
         self.fallback_key = (
             fb_key_cfg or os.getenv("ZHIPU_FALLBACK_API_KEY") or os.getenv("ZHIPUAI_FALLBACK_API_KEY") or self.api_key
@@ -427,7 +434,15 @@ class PreFilterClient:
         ]
         try:
             resp = asyncio.run(
-                call_glm45v(messages, model="glm-4.5-air", request_timeout=8, api_base=base, api_key=api_key)
+                call_glm45v(
+                    messages,
+                    model=self.model,
+                    request_timeout=8,
+                    api_base=base,
+                    api_key=api_key,
+                    fallback_api_key=self.fallback_key,
+                    fallback_api_base=self.fallback_base,
+                )
             )
             bias = "no-trade"
             confidence = 0.0

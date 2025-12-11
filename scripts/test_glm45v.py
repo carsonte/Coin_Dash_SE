@@ -12,11 +12,11 @@ def _build_payload(model: str) -> Dict[str, Any]:
 
 
 def main() -> int:
-    key = os.getenv("ZHIPUAI_API_KEY")
-    base = os.getenv("ZHIPUAI_API_BASE", "https://api.ezworkapi.top/api/paas/v4/chat/completions")
-    model = os.getenv("ZHIPUAI_MODEL", "glm-4.5-air")
+    key = os.getenv("GLM_API_KEY")
+    base = os.getenv("GLM_API_BASE", "https://api.ezworkapi.top/v1/chat/completions")
+    model = os.getenv("GLM_MODEL", "glm-4.5-air")
     if not key:
-        print("missing ZHIPUAI_API_KEY", file=sys.stderr)
+        print("missing GLM_API_KEY", file=sys.stderr)
         return 1
 
     payload = _build_payload(model)
@@ -26,15 +26,15 @@ def main() -> int:
         resp.raise_for_status()
         data = resp.json()
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-        print(f"glm-4.5-air ok -> {content[:200].strip()!r}")
+        print(f"{model} ok -> {content[:200].strip()!r}")
         return 0
     except requests.HTTPError as exc:  # noqa: BLE001
         status = exc.response.status_code if exc.response is not None else "unknown"
         text = exc.response.text if exc.response is not None else str(exc)
-        print(f"glm-4.5-air HTTP error status={status} body={text[:200]}", file=sys.stderr)
+        print(f"{model} HTTP error status={status} body={text[:200]}", file=sys.stderr)
         return 2
     except Exception as exc:  # noqa: BLE001
-        print(f"glm-4.5-air unexpected error: {exc}", file=sys.stderr)
+        print(f"{model} unexpected error: {exc}", file=sys.stderr)
         return 3
 
 

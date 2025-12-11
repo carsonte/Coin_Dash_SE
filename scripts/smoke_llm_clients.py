@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 from coin_dash.llm_clients import LLMClientError, call_glm45v, call_gpt4omini
 
@@ -24,7 +25,8 @@ async def _run_client(name: str, func) -> None:
 
 async def main() -> None:
     await _run_client("gpt-4o-mini@aizex", call_gpt4omini)
-    await _run_client("glm-4.5-air", call_glm45v)
+    glm_name = os.getenv("GLM_MODEL") or os.getenv("ZHIPUAI_MODEL") or "glm-4.5-air"
+    await _run_client(glm_name, call_glm45v)
 
 
 if __name__ == "__main__":

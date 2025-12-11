@@ -148,7 +148,7 @@ class EventTriggersCfg(BaseModel):
 
 class LLMEndpointCfg(BaseModel):
     api_key: str = ""
-    api_base: str = "https://api.ezworkapi.top/api/paas/v4/chat/completions"
+    api_base: str = "https://api.ezworkapi.top/v1/chat/completions"
     model: str = "glm-4.5-air"
     fallback_api_key: str = ""
     fallback_api_base: str = ""

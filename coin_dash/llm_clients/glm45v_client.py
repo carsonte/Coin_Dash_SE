@@ -11,7 +11,7 @@ from .errors import LLMClientError
 
 DEFAULT_TIMEOUT = 30
 # 默认改用第三方 glm-4.5-air 代理（OpenAI 兼容）
-DEFAULT_GLM_BASE = "https://api.ezworkapi.top/api/paas/v4/chat/completions"
+DEFAULT_GLM_BASE = "https://api.ezworkapi.top/v1/chat/completions"
 
 
 def _validate_messages(messages: List[Dict[str, Any]]) -> None:
@@ -53,7 +53,7 @@ async def call_glm45v(messages: List[Dict[str, Any]], **kwargs: Any) -> Dict[str
     _validate_messages(messages)
 
     timeout = float(kwargs.pop("request_timeout", DEFAULT_TIMEOUT))
-    model = kwargs.pop("model", "glm-4.5-air")
+    model = kwargs.pop("model", None) or os.getenv("GLM_MODEL") or os.getenv("ZHIPUAI_MODEL") or "glm-4.5-air"
     payload: Dict[str, Any] = {"model": model, "messages": messages}
     if kwargs:
         payload.update(kwargs)
