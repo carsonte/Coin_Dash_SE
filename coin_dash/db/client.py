@@ -38,7 +38,8 @@ class DatabaseClient:
         self._session_factory = scoped_session(factory)
         if self.cfg.auto_migrate:
             Base.metadata.create_all(self.engine)
-            self._ensure_columns()
+        # run_id 等关键字段缺失会导致运行时异常，这里无论是否 auto_migrate 都做幂等补列
+        self._ensure_columns()
             logger.info("Database schema ensured via auto_migrate.")
 
     @contextmanager

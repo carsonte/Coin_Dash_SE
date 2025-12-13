@@ -9,10 +9,10 @@ Coin Dash 是一套多周期数字货币/黄金的自动化交易决策链，核
 --------
 - 多模型委员会：默认开启 `enable_multi_model_committee`，DeepSeek + gpt-4o-mini（Aizex）+ Qwen 共同投票；DeepSeek 权重最高（0.5），gpt-4o-mini 0.3，Qwen 0.2，可在开关关闭时回退到单 DeepSeek。
 - 前置双模型门卫（B1）：gpt-4o-mini 0.6 + Qwen 0.4 快速判定“要不要走 DeepSeek”，冲突或低置信度直接 `no-trade`，理由会写入决策元信息。
-- 预过滤改为 Qwen：`ai/filter_adapter.py` 使用 Qwen 轻量判定是否值得进入后续链路（失败自动放行），配置使用 `QWEN_API_KEY/QWEN_API_BASE/QWEN_MODEL`。
-- LLM 客户端：新增 `call_gpt4omini`（Aizex）与 `call_qwen`；`scripts/smoke_llm_clients.py` 提供连通性冒烟；缺 Key 时测试自动跳过。
+- 预过滤改为 Qwen：`ai/filter_adapter.py` 使用 Qwen 轻量判定是否值得进入后续链路（失败自动放行），配置使用 `QWEN_API_KEY/QWEN_API_BASE/QWEN_MODEL`，并支持 fallback 配置（`glm_fallback`）。
+- LLM 客户端：新增 `call_gpt4omini`（Aizex）与 `call_qwen`；`scripts/smoke_llm_clients_smoke.py` 提供连通性冒烟；缺 Key 时测试自动跳过。
 - 决策持久化：`ai_decisions` 记录增加 `model_name/committee_id/weight/is_final`，会落三条模型记录 + 一条委员会最终结果（或前置委员会总结）。
-- 日志/前端：日志页支持按 deepseek/gpt-4o-mini/qwen/committee 过滤，run_id 与 committee_id 关联查询。
+- 通知：飞书卡片推送失败会记录 warning，便于排障；发送时显式使用 UTF-8。
 - MT5 行情源：默认启用 `mt5_api`（/price /ohlc），tick_volume 替换 volume，时间戳按秒对齐。
 - 测试现状：`python -m pytest --disable-warnings` 全量通过；若需加载 .env，可用 `python -m dotenv run -- python -m pytest tests/test_llm_clients_smoke.py --disable-warnings --maxfail=1` 运行 LLM 冒烟。
 

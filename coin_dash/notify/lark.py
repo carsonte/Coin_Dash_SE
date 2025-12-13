@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import hmac
+import logging
 import os
 import time
 from dataclasses import dataclass
@@ -13,6 +14,9 @@ import requests
 
 if TYPE_CHECKING:
     from ..signals.manager import SignalRecord
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -29,7 +33,6 @@ class ReviewClosePayload:
     action: str = "提前平仓"
 
 
-@dataclass
 @dataclass
 class WatchPayload:
     symbol: str
@@ -145,9 +148,9 @@ def _post(webhook: str, card: Dict) -> None:
             timeout=5,
         )
         resp.raise_for_status()
-    except Exception:
-        # 通知失败不阻塞主流程
-        pass
+    except Exception as exc:
+        # 通知失败不阻塞主流程，但记录警告便于排障
+        LOGGER.warning("lark_post_failed err=%s", exc)
 
 
 def _fmt_local(dt: datetime, fmt: str = "%m-%d %H:%M") -> str:

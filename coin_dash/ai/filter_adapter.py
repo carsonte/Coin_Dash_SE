@@ -91,9 +91,28 @@ class PreFilterClient:
     ) -> None:
         self.enabled = bool(getattr(cfg, "enabled", True))
         self.on_error = (getattr(cfg, "on_error", None) or "call_deepseek").lower()
-        self.api_key = api_key or (glm_client_cfg.api_key if glm_client_cfg else None) or os.getenv("QWEN_API_KEY") or ""
-        self.model = (glm_client_cfg.model if glm_client_cfg else None) or os.getenv("QWEN_MODEL") or "qwen-turbo-2025-07-15"
-        self.endpoint = (endpoint or (glm_client_cfg.api_base if glm_client_cfg else None) or os.getenv("QWEN_API_BASE") or "https://api.ezworkapi.top").rstrip("/")
+        primary_key = glm_client_cfg.api_key if glm_client_cfg else None
+        fallback_key = glm_fallback_cfg.api_key if glm_fallback_cfg else None
+        self.api_key = api_key or primary_key or os.getenv("QWEN_API_KEY") or fallback_key or ""
+
+        primary_model = glm_client_cfg.model if glm_client_cfg else None
+        fallback_model = glm_fallback_cfg.model if glm_fallback_cfg else None
+        self.model = (
+            primary_model
+            or os.getenv("QWEN_MODEL")
+            or fallback_model
+            or "qwen-turbo-2025-07-15"
+        )
+
+        primary_base = glm_client_cfg.api_base if glm_client_cfg else None
+        fallback_base = glm_fallback_cfg.api_base if glm_fallback_cfg else None
+        self.endpoint = (
+            endpoint
+            or primary_base
+            or os.getenv("QWEN_API_BASE")
+            or fallback_base
+            or "https://api.ezworkapi.top"
+        ).rstrip("/")
         self.session = None
 
     def should_call_deepseek(
