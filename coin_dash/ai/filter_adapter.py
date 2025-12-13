@@ -87,6 +87,7 @@ class PreFilterClient:
         glm_client_cfg: Optional["LLMEndpointCfg"] = None,
         api_key: Optional[str] = None,
         endpoint: Optional[str] = None,
+        glm_fallback_cfg: Optional["LLMEndpointCfg"] = None,
     ) -> None:
         self.enabled = bool(getattr(cfg, "enabled", True))
         self.on_error = (getattr(cfg, "on_error", None) or "call_deepseek").lower()

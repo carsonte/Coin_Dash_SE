@@ -65,7 +65,11 @@ def run_backtest(
         else None
     )
     glm_filter_enabled = bool(getattr(cfg, "glm_filter", None) and cfg.glm_filter.enabled)
-    glm_prefilter = PreFilterClient(cfg.glm_filter, cfg.llm.glm, cfg.llm.glm_fallback) if glm_filter_enabled else None
+    glm_prefilter = (
+        PreFilterClient(cfg.glm_filter, glm_client_cfg=cfg.llm.glm, glm_fallback_cfg=cfg.llm.glm_fallback)
+        if glm_filter_enabled
+        else None
+    )
     safe_mode_cfg = cfg.performance.safe_mode or {}
     safe_mode_threshold = safe_mode_cfg.get("consecutive_stop_losses", 0)
     safe_mode = DailySafeMode(safe_mode_threshold)
