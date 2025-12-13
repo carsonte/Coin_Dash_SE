@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import hmac
 import os
 import time
@@ -134,10 +135,13 @@ def _post(webhook: str, card: Dict) -> None:
     secret = _SIGNING_SECRET
     if secret:
         payload.update(_sign_payload(secret))
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = {"Content-Type": "application/json; charset=utf-8"}
     try:
         resp = requests.post(
             webhook,
-            json=payload,
+            data=body,
+            headers=headers,
             timeout=5,
         )
         resp.raise_for_status()
