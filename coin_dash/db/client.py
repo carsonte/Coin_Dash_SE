@@ -77,6 +77,7 @@ class DatabaseClient:
             "signals": {"run_id": "VARCHAR(64)"},
             "trades": {"run_id": "VARCHAR(64)"},
             "system_events": {"run_id": "VARCHAR(64)"},
+            "positions": {"run_id": "VARCHAR(64)"},
         }
         with self.engine.connect() as conn:
             for table, cols in targets.items():

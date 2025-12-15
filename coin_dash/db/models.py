@@ -87,8 +87,10 @@ class TradeRecord(Base):
 
 class PositionRecord(Base):
     __tablename__ = "positions"
+    __table_args__ = (Index("idx_positions_run_id_created_at", "run_id", "created_at"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     position_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     symbol: Mapped[str] = mapped_column(String(20))
     side: Mapped[str] = mapped_column(String(16))
