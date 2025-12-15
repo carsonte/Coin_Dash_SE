@@ -25,6 +25,25 @@ def _json_safe(obj: Any) -> str:
         return str(obj)
 
 
+def _build_qwen_kwargs(llm_cfg: Optional["LLMClientsCfg"]) -> Dict[str, Any]:
+    """
+    拼装 Qwen 主/备配置，优先 glm 其后 glm_fallback，忽略空值。
+    """
+    kwargs: Dict[str, Any] = {}
+    if llm_cfg is None:
+        return kwargs
+    for cfg in (getattr(llm_cfg, "glm", None), getattr(llm_cfg, "glm_fallback", None)):
+        if cfg is None:
+            continue
+        if cfg.api_key and "api_key" not in kwargs:
+            kwargs["api_key"] = cfg.api_key
+        if cfg.api_base and "api_base" not in kwargs:
+            kwargs["api_base"] = cfg.api_base
+        if cfg.model and "model" not in kwargs:
+            kwargs["model"] = cfg.model
+    return kwargs
+
+
 def _build_messages(symbol: str, payload: Dict[str, Any], role_hint: str) -> list[dict]:
     prompt = (
         "你是 Coin Dash SE 的{role}，请基于给定的市场特征做交易倾向判断，输出 JSON（不要有额外文本）：\n"
@@ -133,7 +152,6 @@ async def decide_front_gate(
     f"""前置双模型委员会（gpt-4o-mini + {MODEL_QWEN}），决定是否调用 DeepSeek。"""
     members: Dict[str, ModelDecision] = {}
     committee_id = uuid4().hex
-    glm_cfg: Optional["LLMEndpointCfg"] = getattr(llm_cfg, "qwen", None) if llm_cfg else None
     gpt_cfg: Optional["LLMEndpointCfg"] = llm_cfg.gpt4omini if llm_cfg else None
 
     gpt_kwargs: Dict[str, Any] = {}
@@ -145,7 +163,7 @@ async def decide_front_gate(
         if gpt_cfg.model:
             gpt_kwargs["model"] = gpt_cfg.model
 
-    glm_kwargs: Dict[str, Any] = {}
+    glm_kwargs = _build_qwen_kwargs(llm_cfg)
 
     async def _retry_call(fn, name: str) -> ModelDecision:
         attempts = 3
@@ -327,7 +345,6 @@ async def decide_with_committee(
     logger = ai_logger or getattr(deepseek_client, "ai_logger", None)
     ds_primary: Optional[Decision] = None
     gpt_cfg: Optional["LLMEndpointCfg"] = llm_cfg.gpt4omini if llm_cfg else None
-    glm_cfg: Optional["LLMEndpointCfg"] = getattr(llm_cfg, "qwen", None) if llm_cfg else None
     gpt_kwargs: Dict[str, Any] = {}
     if gpt_cfg:
         if gpt_cfg.api_key:
@@ -336,14 +353,7 @@ async def decide_with_committee(
             gpt_kwargs["api_base"] = gpt_cfg.api_base
         if gpt_cfg.model:
             gpt_kwargs["model"] = gpt_cfg.model
-    glm_kwargs: Dict[str, Any] = {}
-    if glm_cfg:
-        if glm_cfg.api_key:
-            glm_kwargs["api_key"] = glm_cfg.api_key
-        if glm_cfg.api_base:
-            glm_kwargs["api_base"] = glm_cfg.api_base
-        if glm_cfg.model:
-            glm_kwargs["model"] = glm_cfg.model
+    glm_kwargs = _build_qwen_kwargs(llm_cfg)
     # DeepSeek (同步客户端，放线程池)
     try:
         if overrides and "deepseek" in overrides:

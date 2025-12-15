@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, cast, String
+from dotenv import load_dotenv
 
 from .config import load_config
 from .db import build_database_services, DatabaseServices
 from .db.models import AIDecisionLog, SystemEvent, TradeRecord, SignalEntry
 
+
+ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(ROOT / ".env", override=False)
 
 cfg = load_config(None)
 services: Optional[DatabaseServices] = build_database_services(cfg.database, run_id=None)
