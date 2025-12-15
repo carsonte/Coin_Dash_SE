@@ -269,6 +269,9 @@ class LiveOrchestrator:
             last = self.last_open.get(key)
             if last and (now - last) < cooldown:
                 return
+        if self.state.list_positions(symbol):
+            LOGGER.info("skip open: %s already has open position", symbol)
+            return
         if quote is None:
             try:
                 quote = self.fetcher.fetch_price(symbol)

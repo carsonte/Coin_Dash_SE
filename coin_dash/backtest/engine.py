@@ -157,6 +157,10 @@ def run_backtest(
             logs.append(f"{ts} reject {symbol} {decision.decision} reason={validation.reason}")
             continue
 
+        if broker.has_open(symbol):
+            logs.append(f"{ts} skip new trade for {symbol}: position already open")
+            continue
+
         plan = position_size(broker.equity, decision, trade_type, cfg.risk)
         if plan.qty <= 0:
             logs.append(f"{ts} plan qty=0")

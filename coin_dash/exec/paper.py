@@ -34,6 +34,10 @@ class PaperBroker:
         self.trades: list[Trade] = []
         self.counter = 0
 
+    def has_open(self, symbol: str) -> bool:
+        """Return True if there's an open trade for the symbol."""
+        return any(t.symbol == symbol and t.closed_at is None for t in self.trades)
+
     def open(self, symbol: str, side: str, entry: float, stop: float, take: float, qty: float, ts: int, trade_type: str, mode: str, rr: float) -> Trade:
         fee = entry * qty * self.fee_rate
         self.equity -= fee
