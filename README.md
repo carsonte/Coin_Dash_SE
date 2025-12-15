@@ -71,3 +71,11 @@ Coin Dash 是一套多周期数字货币/黄金的自动化交易决策链，核
 --------
 - `config/config.yaml`：关键参数示例
 - `docs/glm_filter.md`：预过滤结构说明（字段名沿用旧称，现由 Qwen 提供）
+
+Position policy
+---------------
+- 实盘/回测均限制同一币种同时仅保留一单：发现已有持仓/信号会跳过新开仓，避免多单叠加。
+
+Testing status
+--------------
+- 当前 16 项测试全部通过：python -m pytest --disable-warnings（LLM 冒烟在缺 Key 时自动跳过）。
