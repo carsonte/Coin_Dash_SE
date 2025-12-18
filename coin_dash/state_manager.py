@@ -79,7 +79,7 @@ class PositionState:
 
 
 class StateManager:
-    def __init__(self, storage_path: Path) -> None:
+    def __init__(self, storage_path: Path, base_equity: float = 1000.0) -> None:
         self.path = Path(storage_path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._positions: Dict[str, List[PositionState]] = {}
@@ -88,7 +88,7 @@ class StateManager:
         self._modes: Dict[str, str] = {}
         self._safe_mode: Dict = {}
         self._daily_summary: Dict = {}
-        self.base_equity = 1000.0
+        self.base_equity = float(base_equity)
         self._load()
 
     def _load(self) -> None:
@@ -105,7 +105,7 @@ class StateManager:
         self._modes = raw.get("modes", {})
         self._safe_mode = raw.get("safe_mode", {})
         self._daily_summary = raw.get("daily_summary", {})
-        self.base_equity = raw.get("base_equity", self.base_equity)
+        self.base_equity = float(raw.get("base_equity", self.base_equity))
 
     def _dump(self) -> None:
         payload = {

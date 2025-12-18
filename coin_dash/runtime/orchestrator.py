@@ -62,7 +62,7 @@ class LiveOrchestrator:
             decision_logger=decision_logger,
         )
         self.webhook = webhook or cfg.notifications.lark_webhook
-        self.state = StateManager(STATE_PATH)
+        self.state = StateManager(STATE_PATH, base_equity=cfg.backtest.initial_equity)
         self.signal_manager = SignalManager(cfg.signals)
         self.db = db_services
         self.run_id = run_id or (db_services.run_id if db_services else None)
@@ -695,7 +695,9 @@ class LiveOrchestrator:
         trade_id = self.paper_positions.pop(position_id, None)
         if not trade_id:
             return
-        self.paper_broker.close(trade_id, price, ts, reason)
+        trade = self.paper_broker.close(trade_id, price, ts, reason)
+        if trade and self.db and getattr(self.db, "performance", None):
+            self.db.performance.record_trade(trade, trade.trade_type, trade.market_mode)
 
     def _adjust_paper_trade(self, position_id: str, new_stop: float, new_take: float, note: str) -> None:
         trade_id = self.paper_positions.get(position_id)

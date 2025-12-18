@@ -1382,7 +1382,7 @@ def cmd_close_all(args: argparse.Namespace) -> None:
     services = _build_db_services(cfg)
     from .runtime.orchestrator import STATE_PATH
     symbols = [s.strip() for s in (args.symbols.split(",") if args.symbols else cfg.symbols)]
-    state = StateManager(STATE_PATH)
+    state = StateManager(STATE_PATH, base_equity=cfg.backtest.initial_equity)
     webhook = cfg.notifications.lark_webhook
     for symbol in symbols:
         for pos in list(state.list_positions(symbol)):
