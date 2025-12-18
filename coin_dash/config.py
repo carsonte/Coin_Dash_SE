@@ -155,8 +155,10 @@ class LLMEndpointCfg(BaseModel):
 
 
 class LLMClientsCfg(BaseModel):
-    glm: LLMEndpointCfg = Field(default_factory=LLMEndpointCfg)  # 兼容旧字段，实际指向 Qwen
-    glm_fallback: LLMEndpointCfg = Field(default_factory=LLMEndpointCfg)  # 兼容旧字段，可留空
+    # Qwen 为主字段，glm 为兼容别名
+    qwen: LLMEndpointCfg = Field(default_factory=LLMEndpointCfg)
+    glm: LLMEndpointCfg = Field(default_factory=LLMEndpointCfg)
+    glm_fallback: LLMEndpointCfg = Field(default_factory=LLMEndpointCfg)
     gpt4omini: LLMEndpointCfg = Field(
         default_factory=lambda: LLMEndpointCfg(api_key="", api_base="", model="gpt-4o-mini")
     )
@@ -181,6 +183,8 @@ class AppConfig(BaseModel):
     notifications: NotificationsCfg = Field(default_factory=NotificationsCfg)
     log: LogCfg = Field(default_factory=LogCfg)
     event_triggers: EventTriggersCfg = Field(default_factory=EventTriggersCfg)
+    # qwen_filter 为主字段，glm_filter 兼容旧字段；load_config 会同步
+    qwen_filter: GLMFilterCfg = Field(default_factory=GLMFilterCfg)
     glm_filter: GLMFilterCfg = Field(default_factory=GLMFilterCfg)
 
 
@@ -189,22 +193,29 @@ def load_config(path: Optional[Path] = None) -> AppConfig:
     with open(cfg_path, "r", encoding="utf-8") as f:
         data: Dict[str, Any] = yaml.safe_load(f) or {}
     # Ensure nested defaults exist
-    data.setdefault("data", {})
+        data.setdefault("data", {})
     data.setdefault("live", {})
+    # qwen_filter 为主字段，兼容 glm_filter
+    data.setdefault("qwen_filter", data.get("glm_filter", {}))
+    data.setdefault("glm_filter", data.get("qwen_filter", {}))
     llm_cfg = data.setdefault("llm", {})
-    llm_cfg.setdefault("glm", {})
-    llm_cfg.setdefault("glm_fallback", {})
-    llm_cfg.setdefault("gpt4omini", {})
+    llm_cfg.setdefault("qwen", llm_cfg.get("glm", {}))
+    llm_cfg.setdefault("glm", llm_cfg.get("qwen", {}))
+    llm_cfg.setdefault("glm_fallback", llm_cfg.get("glm_fallback", {}))
+    llm_cfg.setdefault("gpt4omini", llm_cfg.get("gpt4omini", {}))
     # 环境变量：QWEN/AIZEX（glm 字段兼容旧命名）
-    env_glm = os.getenv("QWEN_API_KEY") or os.getenv("GLM_API_KEY")
-    env_glm_base = os.getenv("QWEN_API_BASE") or os.getenv("GLM_API_BASE")
-    env_glm_model = os.getenv("QWEN_MODEL") or os.getenv("GLM_MODEL")
-    if env_glm:
-        llm_cfg["glm"]["api_key"] = env_glm
-    if env_glm_base:
-        llm_cfg["glm"]["api_base"] = env_glm_base
-    if env_glm_model:
-        llm_cfg["glm"]["model"] = env_glm_model
+    env_qwen = os.getenv("QWEN_API_KEY") or os.getenv("GLM_API_KEY")
+    env_qwen_base = os.getenv("QWEN_API_BASE") or os.getenv("GLM_API_BASE")
+    env_qwen_model = os.getenv("QWEN_MODEL") or os.getenv("GLM_MODEL")
+    if env_qwen:
+        llm_cfg["qwen"]["api_key"] = env_qwen
+        llm_cfg["glm"]["api_key"] = env_qwen
+    if env_qwen_base:
+        llm_cfg["qwen"]["api_base"] = env_qwen_base
+        llm_cfg["glm"]["api_base"] = env_qwen_base
+    if env_qwen_model:
+        llm_cfg["qwen"]["model"] = env_qwen_model
+        llm_cfg["glm"]["model"] = env_qwen_model
     env_glm_fb = os.getenv("GLM_FALLBACK_API_KEY")
     env_glm_fb_base = os.getenv("GLM_FALLBACK_API_BASE")
     if env_glm_fb:
@@ -221,8 +232,10 @@ def load_config(path: Optional[Path] = None) -> AppConfig:
     referer = os.getenv("ZHIPU_HTTP_REFERER") or os.getenv("OPENROUTER_HTTP_REFERER")
     title = os.getenv("ZHIPU_HTTP_TITLE") or os.getenv("OPENROUTER_HTTP_TITLE")
     if referer:
+        llm_cfg["qwen"]["http_referer"] = referer
         llm_cfg["glm"]["http_referer"] = referer
     if title:
+        llm_cfg["qwen"]["http_title"] = title
         llm_cfg["glm"]["http_title"] = title
 
     env_notifications = data.setdefault("notifications", {})
@@ -232,4 +245,7 @@ def load_config(path: Optional[Path] = None) -> AppConfig:
     env_sign = os.getenv("LARK_SIGNING_SECRET")
     if env_sign:
         env_notifications["lark_signing_secret"] = env_sign
+    # 同步兼容字段
+    data["glm_filter"] = data.get("qwen_filter", data.get("glm_filter", {}))
+    llm_cfg["glm"] = llm_cfg.get("qwen", llm_cfg.get("glm", {}))
     return AppConfig(**data)

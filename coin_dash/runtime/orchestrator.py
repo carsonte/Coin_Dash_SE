@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 import logging
 import traceback
 from datetime import datetime, timedelta, timezone
@@ -56,9 +56,9 @@ class LiveOrchestrator:
         decision_logger = db_services.ai_logger if (db_services and db_services.ai_logger) else None
         self.deepseek = DeepSeekClient(
             cfg.deepseek,
-            glm_cfg=cfg.glm_filter,
-            glm_client_cfg=cfg.llm.glm,
-            glm_fallback_cfg=cfg.llm.glm_fallback,
+            glm_cfg=cfg.qwen_filter,
+            glm_client_cfg=cfg.llm.qwen,
+            glm_fallback_cfg=cfg.llm.qwen_fallback,
             decision_logger=decision_logger,
         )
         self.webhook = webhook or cfg.notifications.lark_webhook
@@ -67,9 +67,9 @@ class LiveOrchestrator:
         self.db = db_services
         self.run_id = run_id or (db_services.run_id if db_services else None)
         self.event_triggers_enabled = bool(getattr(cfg, "event_triggers", None) and cfg.event_triggers.enabled)
-        self.glm_filter_enabled = bool(getattr(cfg, "glm_filter", None) and cfg.glm_filter.enabled)
+        self.glm_filter_enabled = bool(getattr(cfg, "glm_filter", None) and cfg.qwen_filter.enabled)
         self.glm_prefilter = (
-            PreFilterClient(cfg.glm_filter, glm_client_cfg=cfg.llm.glm, glm_fallback_cfg=cfg.llm.glm_fallback)
+            PreFilterClient(cfg.qwen_filter, glm_client_cfg=cfg.llm.qwen, glm_fallback_cfg=cfg.llm.qwen_fallback)
             if self.glm_filter_enabled
             else None
         )
@@ -104,14 +104,14 @@ class LiveOrchestrator:
                 self._process_symbol(symbol, df, quote)
             except Exception as exc:
                 traceback.print_exc()
-                self._send_anomaly(f"执行异常：{exc}", impact=f"{symbol} 处理失败")
+                self._send_anomaly(f"行情拉取失败：{exc}", impact=f"{symbol} 无法更新K线")
         self._maybe_send_daily_summary()
 
     def run_heartbeat(self, symbols: List[str]) -> None:
-        """轻量巡检心跳（中文）：
-        - 频率：建议 5 分钟一次，对齐到 5 分钟边界。
-        - 内容：仅更新市价/检测 TP/SL 触发；若短期价格偏离超过 ATR×阈值（signals.review_price_atr），触发临时 DeepSeek 复评。
-        - 不做：新信号生成/模式告警/绩效汇总等重任务，减少无效调用与成本。
+        """杞婚噺宸℃蹇冭烦锛堜腑鏂囷級锛?
+        - 棰戠巼锛氬缓璁?5 鍒嗛挓涓€娆★紝瀵归綈鍒?5 鍒嗛挓杈圭晫銆?
+        - 鍐呭锛氫粎鏇存柊甯備环/妫€娴?TP/SL 瑙﹀彂锛涜嫢鐭湡浠锋牸鍋忕瓒呰繃 ATR脳闃堝€硷紙signals.review_price_atr锛夛紝瑙﹀彂涓存椂 DeepSeek 澶嶈瘎銆?
+        - 涓嶅仛锛氭柊淇″彿鐢熸垚/妯″紡鍛婅/缁╂晥姹囨€荤瓑閲嶄换鍔★紝鍑忓皯鏃犳晥璋冪敤涓庢垚鏈€?
         """
         for symbol in symbols:
             quote, market_open = self._check_market_open(symbol)
@@ -129,7 +129,7 @@ class LiveOrchestrator:
                 self._handle_reviews(symbol, feature_ctx, latest_row)
             except Exception as exc:
                 traceback.print_exc()
-                self._send_anomaly(f"心跳执行异常：{exc}", impact=f"{symbol} 心跳失败")
+                self._send_anomaly(f"行情拉取失败：{exc}", impact=f"{symbol} 无法更新K线")
 
     def _process_symbol(self, symbol: str, df: pd.DataFrame, quote: Optional[Dict[str, float]] = None) -> None:
         multi = self.pipeline.from_dataframe(symbol, df)
@@ -190,7 +190,7 @@ class LiveOrchestrator:
             except Exception as exc:  # noqa: BLE001
                 LOGGER.warning("glm_screen_exception symbol=%s err=%s", symbol, exc)
                 glm_result = GlmFilterResult(
-                    should_call_deepseek=self.cfg.glm_filter.on_error == "call_deepseek",
+                    should_call_deepseek=self.cfg.qwen_filter.on_error == "call_deepseek",
                     reason=f"prefilter_exception:{exc}",
                     danger_flags=["glm_error"],
                     failed_conditions=["glm_error"],
@@ -215,7 +215,7 @@ class LiveOrchestrator:
                 watch_payload = WatchPayload(
                     symbol=symbol,
                     reason=(
-                        f"GLM 预过滤：{reason} "
+                        f"GLM 棰勮繃婊わ細{reason} "
                         f"(trend={glm_result.trend_consistency}, vol={glm_result.volatility_status}, "
                         f"struct={glm_result.structure_relevance}, pattern={glm_result.pattern_candidate})"
                     ),
@@ -234,12 +234,12 @@ class LiveOrchestrator:
                     {
                         "type": "self_critique",
                         "symbol": symbol,
-                        "summary": "上一轮决策因价格/结构异常被 fallback 拒绝，需加强价格关系检查。",
+                        "summary": "上一轮决策因价格/结构异常被 fallback 拒绝，需要加强价格关系检查",
                     }
                 )
             reason = decision.reason or "AI 选择观望"
             if getattr(decision, "meta", {}).get("adapter") == "prefilter":
-                reason = f"GLM 预过滤：{reason}（未调用 DeepSeek）"
+                reason = f"Qwen 预过滤：{reason}（未调用 DeepSeek）"
             watch_payload = WatchPayload(
                 symbol=symbol,
                 reason=reason,
@@ -375,20 +375,20 @@ class LiveOrchestrator:
             if pos.side == "open_long":
                 if low <= pos.stop:
                     triggered = pos.stop
-                    reason = "止损触发"
+                    reason = "姝㈡崯瑙﹀彂"
                     exit_type = "stop_loss"
                 elif high >= pos.take:
                     triggered = pos.take
-                    reason = "止盈触发"
+                    reason = "姝㈢泩瑙﹀彂"
                     exit_type = "take_profit"
             else:
                 if high >= pos.stop:
                     triggered = pos.stop
-                    reason = "止损触发"
+                    reason = "姝㈡崯瑙﹀彂"
                     exit_type = "stop_loss"
                 elif low <= pos.take:
                     triggered = pos.take
-                    reason = "止盈触发"
+                    reason = "姝㈢泩瑙﹀彂"
                     exit_type = "take_profit"
             if triggered is not None:
                 duration = self._format_duration(now - pos.created_at)
@@ -415,7 +415,7 @@ class LiveOrchestrator:
                         {
                             "type": "self_critique",
                             "symbol": symbol,
-                            "summary": f"关闭仓位 side={pos.side} exit={exit_type} rr={pos.rr}",
+                            "summary": f"鍏抽棴浠撲綅 side={pos.side} exit={exit_type} rr={pos.rr}",
                         }
                     )
                     if self.db and self.db.trading:
@@ -440,15 +440,15 @@ class LiveOrchestrator:
         interval = self.cfg.signals.review_interval_minutes
         atr_threshold = self.cfg.signals.review_price_atr
         for pos in self.state.positions_for_review(symbol, interval):
-            # 中文：仅在“逆向波动”超过 ATR×阈值时触发临时复评
+            # 涓枃锛氫粎鍦ㄢ€滈€嗗悜娉㈠姩鈥濊秴杩?ATR脳闃堝€兼椂瑙﹀彂涓存椂澶嶈瘎
             if pos.side == "open_long":
-                reverse_move = max(0.0, pos.entry - price)  # 多头的逆向为下跌
+                reverse_move = max(0.0, pos.entry - price)  # 澶氬ご鐨勯€嗗悜涓轰笅璺?
             else:
-                reverse_move = max(0.0, price - pos.entry)  # 空头的逆向为上涨
+                reverse_move = max(0.0, price - pos.entry)  # 绌哄ご鐨勯€嗗悜涓轰笂娑?
             if atr_val and reverse_move >= atr_val * atr_threshold:
                 self._trigger_review(symbol, pos, feature_ctx, price)
             elif (datetime.now(timezone.utc) - pos.last_review_at) >= timedelta(minutes=interval):
-                # 常规复评（与执行主周期对齐，由调度保证 30m 边界会触发该路径）
+                # 甯歌澶嶈瘎锛堜笌鎵ц涓诲懆鏈熷榻愶紝鐢辫皟搴︿繚璇?30m 杈圭晫浼氳Е鍙戣璺緞锛?
                 self._trigger_review(symbol, pos, feature_ctx, price)
 
     def _trigger_review(self, symbol: str, position: PositionState, feature_ctx, price: float) -> None:
@@ -506,15 +506,15 @@ class LiveOrchestrator:
                 )
             review_payload = ReviewClosePayload(
                 symbol=symbol,
-                side="多头" if position.side == "open_long" else "空头",
+                side="澶氬ご" if position.side == "open_long" else "绌哄ご",
                 entry_price=position.entry,
                 close_price=price,
                 pnl=(price - position.entry) if position.side == "open_long" else (position.entry - price),
                 rr=position.rr,
                 reason=decision.reason,
-                context=decision.context_summary or "复评触发",
+                context=decision.context_summary or "澶嶈瘎瑙﹀彂",
                 confidence=getattr(decision, "confidence", 80.0),
-                action="提前平仓",
+                action="鎻愬墠骞充粨",
             )
             send_review_close_card(self.webhook, review_payload)
             self._publish_performance()
@@ -522,14 +522,14 @@ class LiveOrchestrator:
                 {
                     "type": "self_critique",
                     "symbol": symbol,
-                    "summary": f"复评关闭，趋势={feature_ctx.trend.grade} score={feature_ctx.trend.score:.1f} 模式={feature_ctx.market_mode.name}",
+                    "summary": f"澶嶈瘎鍏抽棴锛岃秼鍔?{feature_ctx.trend.grade} score={feature_ctx.trend.score:.1f} 妯″紡={feature_ctx.market_mode.name}",
                 }
             )
         elif decision.action == "adjust":
             old_stop, old_take, old_rr = position.stop, position.take, position.rr
             new_stop = decision.new_stop_loss if decision.new_stop_loss is not None else old_stop
             new_take = decision.new_take_profit if decision.new_take_profit is not None else old_take
-            # 禁止止损放宽
+            # 绂佹姝㈡崯鏀惧
             if position.side == "open_long":
                 new_stop = max(new_stop, old_stop)
             else:
@@ -548,7 +548,7 @@ class LiveOrchestrator:
                 new_rr = computed_rr
             has_change = (new_stop != old_stop) or (new_take != old_take) or (new_rr != old_rr)
             if not has_change:
-                # 仅刷新复评时间，避免无效卡片
+                # 浠呭埛鏂板璇勬椂闂达紝閬垮厤鏃犳晥鍗＄墖
                 self.state.update_position_levels(symbol, position.id)
                 return
             updated = self.state.update_position_levels(symbol, position.id, new_stop, new_take, new_rr)
@@ -558,7 +558,7 @@ class LiveOrchestrator:
                     self.db.trading.upsert_position(updated)
                 review_payload = ReviewAdjustPayload(
                     symbol=symbol,
-                    side="多头" if position.side == "open_long" else "空头",
+                    side="澶氬ご" if position.side == "open_long" else "绌哄ご",
                     entry_price=position.entry,
                     old_stop=old_stop,
                     new_stop=new_stop,
@@ -567,7 +567,7 @@ class LiveOrchestrator:
                     old_rr=old_rr,
                     new_rr=new_rr,
                     reason=decision.reason,
-                    market_update="复评调整",
+                    market_update="澶嶈瘎璋冩暣",
                     next_review=datetime.now(timezone.utc) + timedelta(minutes=self.cfg.signals.review_interval_minutes),
                 )
                 send_review_adjust_card(self.webhook, review_payload)
@@ -575,8 +575,8 @@ class LiveOrchestrator:
     def _check_market_open(self, symbol: str) -> tuple[Dict[str, float], bool]:
         """
         Detect simple market break/closed periods to avoid wasting API/DeepSeek calls.
-        - BTCUSDm 视为 24h 开市。
-        - XAUUSDm 若 bid/ask 缺失或 tick 时间超过阈值（默认 120s）判定休盘。
+        - BTCUSDm 瑙嗕负 24h 寮€甯傘€?
+        - XAUUSDm 鑻?bid/ask 缂哄け鎴?tick 鏃堕棿瓒呰繃闃堝€硷紙榛樿 120s锛夊垽瀹氫紤鐩樸€?
         """
         upper = symbol.upper()
         if not upper.startswith("XAU"):
@@ -647,8 +647,7 @@ class LiveOrchestrator:
         if activated:
             self._send_anomaly("安全模式触发：连续止损超限", "暂停开仓等待人工确认")
 
-    def _build_performance_snapshot(self) -> tuple[Dict[str, float], Dict, Dict, Dict]:
-        stats = self.state.performance_stats()
+    def _build_performance_snapshot(self) -> tuple[Dict[str, float], Dict, Dict, Dict]:        stats = self.state.performance_stats()
         modes = self.state.grouped_stats("market_mode")
         trade_types = self.state.grouped_stats("trade_type")
         symbols = self.state.grouped_stats("symbol")
@@ -678,7 +677,7 @@ class LiveOrchestrator:
         self._adjust_thresholds(stats)
 
     def _adjust_thresholds(self, stats: Dict[str, float]) -> None:
-        # AI 全权决策，关闭基于表现对人工阈值的自动微调。
+        # AI 鍏ㄦ潈鍐崇瓥锛屽叧闂熀浜庤〃鐜板浜哄伐闃堝€肩殑鑷姩寰皟銆?
         return
 
     @staticmethod
@@ -704,3 +703,11 @@ class LiveOrchestrator:
         if not trade_id:
             return
         self.paper_broker.adjust(trade_id, new_stop=new_stop, new_take=new_take, note=note)
+
+
+
+
+
+
+
+

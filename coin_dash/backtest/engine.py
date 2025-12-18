@@ -56,17 +56,17 @@ def run_backtest(
     deepseek_client = (
         DeepSeekClient(
             cfg.deepseek,
-            glm_cfg=cfg.glm_filter,
-            glm_client_cfg=cfg.llm.glm,
-            glm_fallback_cfg=cfg.llm.glm_fallback,
+            glm_cfg=cfg.qwen_filter,
+            glm_client_cfg=cfg.llm.qwen,
+            glm_fallback_cfg=cfg.llm.qwen_fallback,
             decision_logger=decision_logger,
         )
         if use_deepseek
         else None
     )
-    glm_filter_enabled = bool(getattr(cfg, "glm_filter", None) and cfg.glm_filter.enabled)
+    glm_filter_enabled = bool(getattr(cfg, "glm_filter", None) and cfg.qwen_filter.enabled)
     glm_prefilter = (
-        PreFilterClient(cfg.glm_filter, glm_client_cfg=cfg.llm.glm, glm_fallback_cfg=cfg.llm.glm_fallback)
+        PreFilterClient(cfg.qwen_filter, glm_client_cfg=cfg.llm.qwen, glm_fallback_cfg=cfg.llm.qwen_fallback)
         if glm_filter_enabled
         else None
     )
@@ -127,7 +127,7 @@ def run_backtest(
                 glm_result = glm_prefilter.should_call_deepseek(glm_context)
             except Exception as exc:  # noqa: BLE001
                 glm_result = GlmFilterResult(
-                    should_call_deepseek=cfg.glm_filter.on_error == "call_deepseek",
+                    should_call_deepseek=cfg.qwen_filter.on_error == "call_deepseek",
                     reason=f"prefilter_exception:{exc}",
                     danger_flags=["glm_error"],
                     failed_conditions=["glm_error"],
@@ -427,3 +427,4 @@ def _risk_quality_hint(feature_ctx) -> Dict[str, float]:
     if mode in ("chaotic", "ranging"):
         risk += 20
     return {"risk": min(risk, 100.0), "quality": min(quality, 100.0)}
+
