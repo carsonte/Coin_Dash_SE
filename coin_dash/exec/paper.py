@@ -34,9 +34,16 @@ class PaperBroker:
         self.trades: list[Trade] = []
         self.counter = 0
 
-    def has_open(self, symbol: str) -> bool:
-        """Return True if there's an open trade for the symbol."""
-        return any(t.symbol == symbol and t.closed_at is None for t in self.trades)
+    def has_open(self, symbol: str, max_open: int | None = None) -> bool:
+        """
+        Return True if there's an open trade for the symbol.
+        - max_open is None: any existing open trade blocks.
+        - max_open > 0: block only when open trades for symbol reach the limit.
+        """
+        opens = [t for t in self.trades if t.symbol == symbol and t.closed_at is None]
+        if max_open is None:
+            return bool(opens)
+        return len(opens) >= max_open
 
     def open(self, symbol: str, side: str, entry: float, stop: float, take: float, qty: float, ts: int, trade_type: str, mode: str, rr: float) -> Trade:
         fee = entry * qty * self.fee_rate

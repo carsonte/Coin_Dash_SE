@@ -269,8 +269,18 @@ class LiveOrchestrator:
             last = self.last_open.get(key)
             if last and (now - last) < cooldown:
                 return
-        if self.state.list_positions(symbol):
-            LOGGER.info("skip open: %s already has open position", symbol)
+        max_same = int(self.cfg.signals.max_same_direction or 0)
+        existing_positions = self.state.list_positions(symbol)
+        if max_same and len(existing_positions) >= max_same:
+            LOGGER.info("skip open: %s existing=%s limit=%s", symbol, len(existing_positions), max_same)
+            watch_payload = WatchPayload(
+                symbol=symbol,
+                reason=f"已有 {len(existing_positions)} 笔持仓，超过上限 {max_same}",
+                market_note=feature_ctx.reason,
+                confidence=decision.confidence,
+                next_check=datetime.now(timezone.utc) + timedelta(minutes=self.cfg.signals.review_interval_minutes),
+            )
+            send_watch_card(self.webhook, watch_payload)
             return
         if quote is None:
             try:
@@ -647,7 +657,8 @@ class LiveOrchestrator:
         if activated:
             self._send_anomaly("安全模式触发：连续止损超限", "暂停开仓等待人工确认")
 
-    def _build_performance_snapshot(self) -> tuple[Dict[str, float], Dict, Dict, Dict]:        stats = self.state.performance_stats()
+    def _build_performance_snapshot(self) -> tuple[Dict[str, float], Dict, Dict, Dict]:
+        stats = self.state.performance_stats()
         modes = self.state.grouped_stats("market_mode")
         trade_types = self.state.grouped_stats("trade_type")
         symbols = self.state.grouped_stats("symbol")
@@ -703,6 +714,7 @@ class LiveOrchestrator:
         if not trade_id:
             return
         self.paper_broker.adjust(trade_id, new_stop=new_stop, new_take=new_take, note=note)
+
 
 
 

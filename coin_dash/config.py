@@ -116,7 +116,7 @@ class SignalsCfg(BaseModel):
     review_price_atr: float = 0.8
     review_max_context: int = 5
     expiry_hours: Dict[str, int] = Field(default_factory=dict)
-    max_same_direction: int = 1
+    max_same_direction: int = 3
 
 
 class PerformanceCfg(BaseModel):
@@ -249,3 +249,4 @@ def load_config(path: Optional[Path] = None) -> AppConfig:
     data["glm_filter"] = data.get("qwen_filter", data.get("glm_filter", {}))
     llm_cfg["glm"] = llm_cfg.get("qwen", llm_cfg.get("glm", {}))
     return AppConfig(**data)
+

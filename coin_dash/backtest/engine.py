@@ -157,8 +157,9 @@ def run_backtest(
             logs.append(f"{ts} reject {symbol} {decision.decision} reason={validation.reason}")
             continue
 
-        if broker.has_open(symbol):
-            logs.append(f"{ts} skip new trade for {symbol}: position already open")
+        max_same = int(cfg.signals.max_same_direction or 0)
+        if max_same and broker.has_open(symbol, max_same):
+            logs.append(f"{ts} skip new trade for {symbol}: existing positions >= {max_same}")
             continue
 
         plan = position_size(broker.equity, decision, trade_type, cfg.risk)

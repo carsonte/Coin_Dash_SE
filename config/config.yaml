@@ -1,6 +1,6 @@
-# Global configuration (UTC based)
+﻿# Global configuration (UTC based)
 
-# 交易品种列表
+# 浜ゆ槗鍝佺鍒楄〃
 symbols:
   - BTCUSDm
   - ETHUSDm
@@ -15,11 +15,11 @@ live:
     - XAUUSDm
 
 timeframes:
-  lookback_bars: 320          # 各周期最多保留的K线数量
-  filter_fast: 30m            # 快周期，用于计算特征/ATR
-  filter_slow: 1h             # 慢周期，用于特征/ATR
-  eth_aux: 15m                # ETH 辅助周期
-  defs:                       # 各周期定义（分钟、ATR/成交量异常阈值）
+  lookback_bars: 320          # 鍚勫懆鏈熸渶澶氫繚鐣欑殑K绾挎暟閲?
+  filter_fast: 30m            # 蹇懆鏈燂紝鐢ㄤ簬璁＄畻鐗瑰緛/ATR
+  filter_slow: 1h             # 鎱㈠懆鏈燂紝鐢ㄤ簬鐗瑰緛/ATR
+  eth_aux: 15m                # ETH 杈呭姪鍛ㄦ湡
+  defs:                       # 鍚勫懆鏈熷畾涔夛紙鍒嗛挓銆丄TR/鎴愪氦閲忓紓甯搁槇鍊硷級
     1d:
       minutes: 1440
       atr_spike: 5.0
@@ -47,7 +47,7 @@ data:
     base_url: "http://43.156.27.55:5005"
 
 llm:
-  glm:  # 兼容命名，实际指向 Qwen
+  glm:  # 鍏煎鍛藉悕锛屽疄闄呮寚鍚?Qwen
     api_base: "https://api.ezworkapi.top"
     model: "qwen-turbo-2025-07-15"
   glm_fallback: {}
@@ -56,7 +56,7 @@ llm:
     model: "gpt-4o-mini"
 
 market_filter:
-  # 活跃度阈值（AI版已不再限制，仅保留字段）
+  # 娲昏穬搴﹂槇鍊硷紙AI鐗堝凡涓嶅啀闄愬埗锛屼粎淇濈暀瀛楁锛?
   score_thresholds:
     BTCUSDT: 0.55
     ETHUSDT: 0.72
@@ -72,8 +72,8 @@ market_filter:
     resume_consecutive: 2
 
 risk:
-  risk_per_trade: 0.01        # 单笔风险占净值比例（AI仓位不指定时的兜底算法）
-  validation_enabled: false   # 是否启用本地风控校验（价格顺序/RR 边界），默认关闭
+  risk_per_trade: 0.01        # 鍗曠瑪椋庨櫓鍗犲噣鍊兼瘮渚嬶紙AI浠撲綅涓嶆寚瀹氭椂鐨勫厹搴曠畻娉曪級
+  validation_enabled: false   # 鏄惁鍚敤鏈湴椋庢帶鏍￠獙锛堜环鏍奸『搴?RR 杈圭晫锛夛紝榛樿鍏抽棴
   rr_bounds:
     min: 1.5
     max: 5.0
@@ -81,28 +81,28 @@ risk:
   tp_atr_mult: 3.0
   stop_buffer_pct: 0.015
   stop_atr_cap: 3.0
-  trade_type_modifiers:       # 交易类型参数（AI自主版大多已不生效，仅留作参考）
+  trade_type_modifiers:       # 浜ゆ槗绫诲瀷鍙傛暟锛圓I鑷富鐗堝ぇ澶氬凡涓嶇敓鏁堬紝浠呯暀浣滃弬鑰冿級
     trend: { position_scale: 1.0, min_confidence: 75, min_rr: 1.5, stop_atr_mult: 3.0 }
     reverse_minor: { position_scale: 0.7, min_confidence: 80, min_rr: 3.0, stop_atr_mult: 4.0 }
     reverse_major: { position_scale: 0.5, min_confidence: 85, min_rr: 4.0, stop_atr_mult: 4.0 }
 
 signals:
-  cooldown_minutes: 30        # 信号冷却（AI版已放开）
-  review_interval_minutes: 60 # 复评最小间隔
-  review_price_atr: 0.8       # 价格偏离触发复评的 ATR 倍数
-  review_max_context: 5       # 复评上下文轮次
-  expiry_hours:               # 不同市场模式下的信号过期时间
+  cooldown_minutes: 30        # 淇″彿鍐峰嵈锛圓I鐗堝凡鏀惧紑锛?
+  review_interval_minutes: 60 # 澶嶈瘎鏈€灏忛棿闅?
+  review_price_atr: 0.8       # 浠锋牸鍋忕瑙﹀彂澶嶈瘎鐨?ATR 鍊嶆暟
+  review_max_context: 5       # 澶嶈瘎涓婁笅鏂囪疆娆?
+  expiry_hours:               # 涓嶅悓甯傚満妯″紡涓嬬殑淇″彿杩囨湡鏃堕棿
     trending: 6
     channeling: 6
     ranging: 4
     breakout: 2
     reversal: 3
-  max_same_direction: 1       # 同向允许的最大活跃信号数（AI版已放开）
+  max_same_direction: 3       # 鍚屽悜鍏佽鐨勬渶澶ф椿璺冧俊鍙锋暟锛圓I鐗堝凡鏀惧紑锛?
 event_triggers:
-  enabled: false              # 本地事件触发层：为 false 时保持现有行为；true 时无事件将跳过大模型调用
+  enabled: false              # 鏈湴浜嬩欢瑙﹀彂灞傦細涓?false 鏃朵繚鎸佺幇鏈夎涓猴紱true 鏃舵棤浜嬩欢灏嗚烦杩囧ぇ妯″瀷璋冪敤
 glm_filter:
-  enabled: true               # Qwen 预过滤层开关；false 时直接进入 DeepSeek（保持旧行为）
-  on_error: call_deepseek     # call_deepseek | hold：GLM 异常时的兜底策略
+  enabled: true               # Qwen 棰勮繃婊ゅ眰寮€鍏筹紱false 鏃剁洿鎺ヨ繘鍏?DeepSeek锛堜繚鎸佹棫琛屼负锛?
+  on_error: call_deepseek     # call_deepseek | hold锛欸LM 寮傚父鏃剁殑鍏滃簳绛栫暐
 
 deepseek:
   enabled: true
@@ -114,20 +114,20 @@ deepseek:
   max_tokens: 2000
   stream: false
   budget:
-    daily_tokens: 200000      # 每日 token 上限
-    warn_ratio: 0.8           # 预警比例
+    daily_tokens: 200000      # 姣忔棩 token 涓婇檺
+    warn_ratio: 0.8           # 棰勮姣斾緥
   retry:
     max_attempts: 3
     backoff_seconds: 1.5
 
 exchange:
-  name: binance               # 交易所
-  type: futures               # 现货/合约
-  rate_limit: true            # 是否打开限频
+  name: binance               # 浜ゆ槗鎵€
+  type: futures               # 鐜拌揣/鍚堢害
+  rate_limit: true            # 鏄惁鎵撳紑闄愰
 
 backtest:
-  initial_equity: 10000        # 初始资金
-  fee_rate: 0.0004            # 手续费率
+  initial_equity: 10000        # 鍒濆璧勯噾
+  fee_rate: 0.0004            # 鎵嬬画璐圭巼
 
 database:
   enabled: true
@@ -138,23 +138,24 @@ database:
 
 performance:
   report_hour_utc8: 23
-  safe_mode_enabled: false       # 是否启用安全模式开仓限制，默认关闭以保持原行为
+  safe_mode_enabled: false       # 鏄惁鍚敤瀹夊叏妯″紡寮€浠撻檺鍒讹紝榛樿鍏抽棴浠ヤ繚鎸佸師琛屼负
   safe_mode:
-    consecutive_stop_losses: 5  # 安全模式触发阈值（AI版默认已不启用）
-  adaptive_thresholds:           # 自适应阈值设置（AI版已关闭阈值调整）
+    consecutive_stop_losses: 5  # 瀹夊叏妯″紡瑙﹀彂闃堝€硷紙AI鐗堥粯璁ゅ凡涓嶅惎鐢級
+  adaptive_thresholds:           # 鑷€傚簲闃堝€艰缃紙AI鐗堝凡鍏抽棴闃堝€艰皟鏁达級
     profit_factor_min: 1.1
     win_rate_min: 0.35
     avg_rr_min: 1.3
     threshold_adjustment: 0.1
-  instant_push: true             # 止盈/止损触发后立即推送绩效卡片
-  instant_cooldown_minutes: 30   # 实时卡片推送最小间隔（分钟）
+  instant_push: true             # 姝㈢泩/姝㈡崯瑙﹀彂鍚庣珛鍗虫帹閫佺哗鏁堝崱鐗?
+  instant_cooldown_minutes: 30   # 瀹炴椂鍗＄墖鎺ㄩ€佹渶灏忛棿闅旓紙鍒嗛挓锛?
 
 notifications:
-  lark_webhook: ""            # 飞书 Webhook（优先 .env）
+  lark_webhook: ""            # 椋炰功 Webhook锛堜紭鍏?.env锛?
 
 log:
-  level: DEBUG                # 日志级别
+  level: DEBUG                # 鏃ュ織绾у埆
 
-# LLM 客户端环境变量提示（不在此文件中配置）：
-# - QWEN_API_KEY / QWEN_API_BASE / QWEN_MODEL（默认 https://api.ezworkapi.top, qwen-turbo-2025-07-15）
-# - AIZEX_API_KEY / AIZEX_API_BASE（OpenAI 兼容，gpt-4o-mini）
+# LLM 瀹㈡埛绔幆澧冨彉閲忔彁绀猴紙涓嶅湪姝ゆ枃浠朵腑閰嶇疆锛夛細
+# - QWEN_API_KEY / QWEN_API_BASE / QWEN_MODEL锛堥粯璁?https://api.ezworkapi.top, qwen-turbo-2025-07-15锛?
+# - AIZEX_API_KEY / AIZEX_API_BASE锛圤penAI 鍏煎锛実pt-4o-mini锛?
+
