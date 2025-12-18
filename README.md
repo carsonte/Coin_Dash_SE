@@ -35,6 +35,7 @@ Coin Dash 是一套多周期数字货币/黄金的自动化交易决策链，核
   - Qwen 预过滤（兼容字段名 glm）：`QWEN_API_KEY`，`QWEN_API_BASE`（默认 `https://api.ezworkapi.top/v1/chat/completions`），`QWEN_MODEL`（默认 `qwen-turbo-2025-07-15`）
   - 飞书：`LARK_WEBHOOK`（可选 `LARK_SIGNING_SECRET`）
   - 数据源：如用 MT5，配置 `data.mt5_api.base_url`，符号用 MT5 合约名（`BTCUSDm`/`ETHUSDm`/`XAUUSDm`）
+- 品种规格：`symbol_settings` 显式写合约大小/最小手数/步长/最大手数/杠杆与保证金缓冲；默认全品种 0.01 手步长、1:200 杠杆、margin_buffer=1.2（XAU 合约大小 100）。
 - 开关：`enable_multi_model_committee` 控制是否使用三模型委员会；预过滤开关在 `config/config.yaml` 的 `glm_filter.enabled`（兼容字段名，实际 Qwen）。
 - CLI 示例
   - 回测：`python -m coin_dash.cli backtest --symbol BTCUSDm --csv data/sample/BTCUSDT_30m_2025-10_11.csv --deepseek`

@@ -53,6 +53,7 @@ def run_backtest(
     broker = PaperBroker(cfg.backtest.initial_equity, cfg.backtest.fee_rate)
     tracker = PerformanceTracker()
     decision_logger = db_services.ai_logger if (db_services and db_services.ai_logger) else None
+    symbol_spec = cfg.symbol_settings.get(symbol)
     deepseek_client = (
         DeepSeekClient(
             cfg.deepseek,
@@ -162,9 +163,10 @@ def run_backtest(
             logs.append(f"{ts} skip new trade for {symbol}: existing positions >= {max_same}")
             continue
 
-        plan = position_size(broker.equity, decision, trade_type, cfg.risk)
+        plan = position_size(broker.available_equity, decision, trade_type, cfg.risk, spec=symbol_spec)
         if plan.qty <= 0:
-            logs.append(f"{ts} plan qty=0")
+            note = f" note={plan.note}" if plan.note else ""
+            logs.append(f"{ts} plan qty=0{note}")
             continue
 
         expiry_hours = cfg.signals.expiry_hours.get(feature_ctx.market_mode.name, 4)
@@ -203,7 +205,11 @@ def run_backtest(
             trade_type=trade_type,
             mode=feature_ctx.market_mode.name,
             rr=decision.risk_reward,
+            margin_required=plan.margin_required,
         )
+        if opened_trade is None:
+            logs.append(f"{ts} {symbol} open_rejected: margin_insufficient qty={plan.qty:.4f} need={plan.margin_required:.2f}")
+            continue
         if db_services and db_services.trading:
             db_services.trading.record_trade_open(opened_trade, signal_id=_signal_storage_id(record))
         logs.append(

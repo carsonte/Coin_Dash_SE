@@ -133,6 +133,7 @@ class LiveOrchestrator:
 
     def _process_symbol(self, symbol: str, df: pd.DataFrame, quote: Optional[Dict[str, float]] = None) -> None:
         multi = self.pipeline.from_dataframe(symbol, df)
+        symbol_spec = self.cfg.symbol_settings.get(symbol)
         if self.db and self.db.kline_writer:
             self.db.kline_writer.record_frames(symbol, multi.frames)
         fast_df = multi.get(self.cfg.timeframes.filter_fast)
@@ -293,8 +294,10 @@ class LiveOrchestrator:
                 entry_price = float(quote.get("ask") or entry_price)
             else:
                 entry_price = float(quote.get("bid") or entry_price)
-        plan = position_size(self.cfg.backtest.initial_equity, decision, trade_type, self.cfg.risk)
+        decision.entry_price = entry_price  # 用成交价估计做保证金/风险计算
+        plan = position_size(self.paper_broker.available_equity, decision, trade_type, self.cfg.risk, spec=symbol_spec)
         if plan.qty <= 0:
+            LOGGER.info("skip open %s: plan_qty=0 note=%s", symbol, plan.note)
             return
 
         expires = now + timedelta(hours=self.cfg.signals.expiry_hours.get(feature_ctx.market_mode.name, 4))
@@ -314,17 +317,6 @@ class LiveOrchestrator:
         signal_id = f"{record.symbol}-{int(record.created_at.timestamp())}"
         if self.db and self.db.trading:
             self.db.trading.record_signal(record, correlated, signal_id=signal_id)
-        position = self.state.add_position(
-            symbol,
-            decision.decision,
-            entry_price,
-            decision.stop_loss,
-            decision.take_profit,
-            decision.risk_reward,
-            trade_type,
-            feature_ctx.market_mode.name,
-            qty=plan.qty,
-        )
         paper_trade = self.paper_broker.open(
             symbol=symbol,
             side=decision.decision,
@@ -336,6 +328,27 @@ class LiveOrchestrator:
             trade_type=trade_type,
             mode=feature_ctx.market_mode.name,
             rr=decision.risk_reward,
+            margin_required=plan.margin_required,
+        )
+        if paper_trade is None:
+            LOGGER.info(
+                "open rejected for %s: margin insufficient qty=%.4f need=%.2f free=%.2f",
+                symbol,
+                plan.qty,
+                plan.margin_required,
+                self.paper_broker.available_equity,
+            )
+            return
+        position = self.state.add_position(
+            symbol,
+            decision.decision,
+            entry_price,
+            decision.stop_loss,
+            decision.take_profit,
+            decision.risk_reward,
+            trade_type,
+            feature_ctx.market_mode.name,
+            qty=plan.qty,
         )
         self.paper_positions[position.id] = paper_trade.trade_id
         if decision.decision in ("open_long", "open_short"):

@@ -17,6 +17,7 @@ class Trade:
     trade_type: str
     market_mode: str
     rr: float
+    margin_used: float = 0.0
     closed_at: Optional[int] = None
     pnl: float = 0.0
     history: list[str] = field(default_factory=list)
@@ -32,7 +33,12 @@ class PaperBroker:
         self.equity = equity
         self.fee_rate = fee_rate
         self.trades: list[Trade] = []
+        self.used_margin = 0.0
         self.counter = 0
+
+    @property
+    def available_equity(self) -> float:
+        return max(0.0, self.equity - self.used_margin)
 
     def has_open(self, symbol: str, max_open: int | None = None) -> bool:
         """
@@ -45,14 +51,30 @@ class PaperBroker:
             return bool(opens)
         return len(opens) >= max_open
 
-    def open(self, symbol: str, side: str, entry: float, stop: float, take: float, qty: float, ts: int, trade_type: str, mode: str, rr: float) -> Trade:
+    def open(self, symbol: str, side: str, entry: float, stop: float, take: float, qty: float, ts: int, trade_type: str, mode: str, rr: float, margin_required: float = 0.0) -> Optional[Trade]:
+        if margin_required > self.available_equity + 1e-9:
+            return None
+        self.used_margin += margin_required
         fee = entry * qty * self.fee_rate
         self.equity -= fee
         self.counter += 1
         trade_id = f"T{self.counter:05d}"
-        t = Trade(trade_id=trade_id, symbol=symbol, side=side, entry=entry, stop=stop, take=take, qty=qty, opened_at=ts, trade_type=trade_type, market_mode=mode, rr=rr)
+        t = Trade(
+            trade_id=trade_id,
+            symbol=symbol,
+            side=side,
+            entry=entry,
+            stop=stop,
+            take=take,
+            qty=qty,
+            opened_at=ts,
+            trade_type=trade_type,
+            market_mode=mode,
+            rr=rr,
+            margin_used=margin_required,
+        )
         self.trades.append(t)
-        t.record(f"open {side} qty={qty:.4f} entry={entry:.2f}")
+        t.record(f"open {side} qty={qty:.4f} entry={entry:.2f} margin={margin_required:.2f}")
         return t
 
     def adjust(self, trade_id: str, new_stop: Optional[float] = None, new_take: Optional[float] = None, note: str = "") -> None:
@@ -84,6 +106,7 @@ class PaperBroker:
                 exit_price = t.stop
                 reason = "stop loss"
             if exit_price is not None:
+                self.used_margin = max(0.0, self.used_margin - t.margin_used)
                 fee = exit_price * t.qty * self.fee_rate
                 pnl = (exit_price - t.entry) * t.qty if t.side == "open_long" else (t.entry - exit_price) * t.qty
                 pnl -= fee
@@ -101,6 +124,7 @@ class PaperBroker:
         trade = next((t for t in self.trades if t.trade_id == trade_id), None)
         if trade is None or trade.closed_at is not None:
             return None
+        self.used_margin = max(0.0, self.used_margin - trade.margin_used)
         fee = price * trade.qty * self.fee_rate
         pnl = (price - trade.entry) * trade.qty if trade.side == "open_long" else (trade.entry - price) * trade.qty
         pnl -= fee
@@ -121,6 +145,8 @@ class PaperBroker:
         profit_factor = (total_profit / total_loss) if total_loss else float("inf") if total_profit else 0.0
         return {
             "equity": self.equity,
+            "used_margin": self.used_margin,
+            "free_equity": self.available_equity,
             "trades": len(self.trades),
             "closed": len(closed),
             "wins": len(wins),

@@ -6,6 +6,32 @@ symbols:
   - ETHUSDm
   - XAUUSDm
 
+symbol_settings:
+  BTCUSDm:
+    contract_size: 1
+    min_lot: 0.01
+    lot_step: 0.01
+    max_lot: 20
+    max_leverage: 200
+    margin_buffer: 1.2
+    volatility_discount: 1.0
+  ETHUSDm:
+    contract_size: 1
+    min_lot: 0.01
+    lot_step: 0.01
+    max_lot: 50
+    max_leverage: 200
+    margin_buffer: 1.2
+    volatility_discount: 1.0
+  XAUUSDm:
+    contract_size: 100
+    min_lot: 0.01
+    lot_step: 0.01
+    max_lot: 200
+    max_leverage: 200
+    margin_buffer: 1.2
+    volatility_discount: 1.0
+
 enable_multi_model_committee: true
 
 live:

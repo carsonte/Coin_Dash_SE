@@ -97,6 +97,17 @@ class ExchangeCfg(BaseModel):
     rate_limit: bool = True
 
 
+class SymbolSpecCfg(BaseModel):
+    # 合约规格与风控限制（纸盘/回测/实盘统一）
+    contract_size: float = 1.0
+    min_lot: float = 0.01
+    lot_step: float = 0.01
+    max_lot: float = 100.0
+    max_leverage: float = 200.0
+    margin_buffer: float = 1.2  # 保证金预留系数，例如 1.2 = 多算 20%
+    volatility_discount: float = 1.0  # 高波动品种可在此折扣仓位
+
+
 class BacktestCfg(BaseModel):
     initial_equity: float = 10000.0
     fee_rate: float = 0.0004
@@ -168,6 +179,7 @@ class AppConfig(BaseModel):
     # 启用 B1 前置双模型委员会（gpt-4o-mini + qwen），决定是否调用 DeepSeek
     enable_multi_model_committee: bool = True
     symbols: List[str] = Field(default_factory=lambda: ["BTCUSDm", "ETHUSDm", "XAUUSDm"])
+    symbol_settings: Dict[str, SymbolSpecCfg] = Field(default_factory=dict)
     timeframes: TimeframeCfg = Field(default_factory=TimeframeCfg)
     market_filter: MarketFilterCfg = Field(default_factory=MarketFilterCfg)
     data: DataCfg = Field(default_factory=DataCfg)
@@ -193,8 +205,15 @@ def load_config(path: Optional[Path] = None) -> AppConfig:
     with open(cfg_path, "r", encoding="utf-8") as f:
         data: Dict[str, Any] = yaml.safe_load(f) or {}
     # Ensure nested defaults exist
-        data.setdefault("data", {})
+    data.setdefault("data", {})
     data.setdefault("live", {})
+    data.setdefault("symbol_settings", {})
+    if not data["symbol_settings"]:
+        for sym in data.get("symbols", []):
+            data["symbol_settings"][sym] = {}
+    else:
+        for sym in data.get("symbols", []):
+            data["symbol_settings"].setdefault(sym, {})
     # qwen_filter 为主字段，兼容 glm_filter
     data.setdefault("qwen_filter", data.get("glm_filter", {}))
     data.setdefault("glm_filter", data.get("qwen_filter", {}))
