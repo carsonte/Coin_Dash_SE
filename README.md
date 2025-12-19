@@ -14,6 +14,9 @@ Coin Dash 是一套多周期数字货币/黄金的自动化交易决策链，核
 - 决策持久化：`ai_decisions` 记录增加 `model_name/committee_id/weight/is_final`，会落三条模型记录 + 委员会结果。
 - 通知：飞书卡片推送失败会记录 warning，发送时显式使用 UTF-8。
 - MT5 行情源：默认启用 `mt5_api`（price/ohlc），tick_volume 替换 volume，时间戳按秒对齐。
+- 行情兜底：MT5 连续 3 次失败自动降级到 CCXT 备用源（Binance USDT-M），仅用于行情/纸盘，不触发实盘；备源成功 5 轮探活后自动切回 MT5，XAU 不在备源，异常会推飞书卡片。
+- 备源安全：备源默认不新开仓，可配置 `backup_policy.allow_backup_open`；价差护栏 `deviation_pct`（默认 0.25%）超阈值时，新开仓/自动平仓都会暂停并仅提醒，卡片会标注当前源与点差风险。
+- 卡片源标签：信号/复评/观望/价差提醒卡片会携带 `source=MT5` 或 `source=CCXT-Binance`，备源时提示可能存在点差，仅供决策/纸盘。
 - 测试现状：`python -m pytest --disable-warnings` 全量通过；若需加载 .env，可用 `python -m dotenv run -- python -m pytest tests/test_llm_clients_smoke.py --disable-warnings --maxfail=1` 运行 LLM 冒烟。
 - 绩效统计：实时/复评平仓会写入 performance 表；StateManager 基准权益来自 `backtest.initial_equity` 并持久化，重启后统计不漂移。
 
@@ -36,6 +39,8 @@ Coin Dash 是一套多周期数字货币/黄金的自动化交易决策链，核
   - 飞书：`LARK_WEBHOOK`（可选 `LARK_SIGNING_SECRET`）
   - 数据源：如用 MT5，配置 `data.mt5_api.base_url`，符号用 MT5 合约名（`BTCUSDm`/`ETHUSDm`/`XAUUSDm`）
 - 品种规格：`symbol_settings` 显式写合约大小/最小手数/步长/最大手数/杠杆与保证金缓冲；默认全品种 0.01 手步长、1:200 杠杆、margin_buffer=1.2（XAU 合约大小 100）。
+- 行情与预热：基于 MT5 API 拉最小周期（如 15m/30m）时，会自动拉足高周期所需的底层 K 线（约等于最高周期 20 根所需的 bars，15m 基准约 2000 根），并且直接拉取 1h/4h/1d 周期作为高周期输入，避免数据不足导致交易类型 unknown；若行情为空/过旧/底层不足，会推飞书异常卡片并跳过开仓。
+- 行情备源：主源 MT5，备源 CCXT Binance USDT-M。符号映射 BTCUSDm/ETHUSDm → `BTC/USDT:USDT`/`ETH/USDT:USDT`，XAU 无 USDT-M 合约会跳过。主源连续 3 次失败自动切备，备源连续 5 轮探活成功后切回主源，切换/失败都会推送飞书异常；备源默认不开新仓，价差超 `backup_policy.deviation_pct`（默认 0.25%）时仅提醒不执行。
 - 开关：`enable_multi_model_committee` 控制是否使用三模型委员会；预过滤开关在 `config/config.yaml` 的 `glm_filter.enabled`（兼容字段名，实际 Qwen）。
 - CLI 示例
   - 回测：`python -m coin_dash.cli backtest --symbol BTCUSDm --csv data/sample/BTCUSDT_30m_2025-10_11.csv --deepseek`

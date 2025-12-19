@@ -23,20 +23,24 @@ class DataPipeline:
     def __init__(self, cfg: AppConfig) -> None:
         self.cfg = cfg
 
-    def from_dataframe(self, symbol: str, df: pd.DataFrame) -> MultiTimeframeData:
+    def from_dataframe(self, symbol: str, df: pd.DataFrame, extra_frames: Dict[str, pd.DataFrame] | None = None) -> MultiTimeframeData:
         if df.empty:
             return MultiTimeframeData(frames={}, notes=[f"{symbol}: empty dataframe"])
         df = df.sort_index()
         base_minutes = self._infer_minutes(df)
         frames: Dict[str, pd.DataFrame] = {}
         notes: List[str] = []
+        extras = extra_frames or {}
         for name, tf_def in self.cfg.timeframes.defs.items():
-            if base_minutes and tf_def.minutes < base_minutes:
-                continue  # cannot upscale to higher resolution than we have
-            if tf_def.minutes == base_minutes:
-                frame = df.copy()
+            if name in extras and not extras[name].empty:
+                frame = extras[name].sort_index()
             else:
-                frame = resample_frame(df, tf_def.minutes)
+                if base_minutes and tf_def.minutes < base_minutes:
+                    continue  # cannot upscale to higher resolution than we have
+                if tf_def.minutes == base_minutes:
+                    frame = df.copy()
+                else:
+                    frame = resample_frame(df, tf_def.minutes)
             limit = self.cfg.timeframes.lookback_bars
             if limit and len(frame) > limit:
                 frame = frame.tail(limit)

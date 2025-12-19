@@ -53,6 +53,9 @@ class LiveOrchestrator:
         self.cfg = cfg
         self.fetcher = LiveDataFetcher(cfg)
         self.pipeline = DataPipeline(cfg)
+        self.base_minutes = min(tf.minutes for tf in cfg.timeframes.defs.values())
+        self.max_minutes = max(tf.minutes for tf in cfg.timeframes.defs.values())
+        self.required_base_bars = int((self.max_minutes / self.base_minutes) * 20) if self.base_minutes else 0
         decision_logger = db_services.ai_logger if (db_services and db_services.ai_logger) else None
         self.deepseek = DeepSeekClient(
             cfg.deepseek,
@@ -86,25 +89,79 @@ class LiveOrchestrator:
         self.paper_positions: Dict[str, str] = {}
         self.last_open: Dict[str, datetime] = {}
         self.last_quotes: Dict[str, Dict[str, float]] = {}
+        self.primary_quotes: Dict[str, Dict[str, float]] = {}
+        self.last_data_alert: Dict[str, datetime] = {}
+        self.active_source: str = "primary"
+        self.source_fail: Dict[str, int] = {"primary": 0, "backup": 0}
+        self.source_recover_ok: int = 0
+        self.primary_recheck_needed: bool = False
+        self.source_fail_threshold: int = 3
+        self.source_recover_threshold: int = 5
+        self.has_backup = bool(getattr(self.fetcher, "has_backup", False))
+        policy = getattr(cfg, "backup_policy", None) or {}
+        self.allow_backup_open: bool = bool(getattr(policy, "allow_backup_open", False))
+        self.backup_deviation_pct: float = float(getattr(policy, "deviation_pct", 0.0025))
+        self.source_tags = {"primary": "MT5", "backup": "CCXT-Binance"}
 
     def run_cycle(self, symbols: List[str]) -> None:
+        primary_probe_done = False
         for symbol in symbols:
-            quote, market_open = self._check_market_open(symbol)
+            use_backup = self.active_source == "backup"
+            quote, market_open = self._check_market_open(symbol, use_backup=use_backup)
             if not market_open:
                 print(f"[info] {symbol} market closed / on break")
                 continue
             try:
-                df = self.fetcher.fetch_dataframe(symbol)
+                df = self.fetcher.fetch_dataframe(symbol, use_backup=use_backup)
             except Exception as exc:
                 self._send_anomaly(f"行情拉取失败：{exc}", impact=f"{symbol} 无法更新K线")
+                self._record_source_failure(use_backup)
                 continue
             if df.empty:
+                self._alert_data_issue(symbol, "empty_frame", "行情返回为空，已跳过本轮")
+                self._record_source_failure(use_backup)
                 continue
+            ok, reason = self._check_data_health(df)
+            if not ok:
+                self._alert_data_issue(symbol, "stale_or_short", reason)
+                self._record_source_failure(use_backup)
+                continue
+            if not use_backup:
+                # 记录主源报价基准
+                try:
+                    primary_quote = self.fetcher.fetch_price(symbol, use_backup=False) or {}
+                    if primary_quote:
+                        self.primary_quotes[symbol] = primary_quote
+                except Exception:
+                    pass
+            price_ok, deviation = self._check_price_deviation(symbol, quote, use_backup)
+            if use_backup and not price_ok:
+                self._alert_data_issue(
+                    symbol,
+                    "price_deviation",
+                    f"备源价差 {deviation*100:.2f}% 超阈值 {self.backup_deviation_pct*100:.2f}%，暂停新开仓/自动平仓，仅提醒",
+                )
+            self._record_source_success(use_backup)
+            if use_backup and self.has_backup and not primary_probe_done:
+                primary_probe_done = True
+                if self._probe_primary(symbol):
+                    self.source_recover_ok += 1
+                    if self.source_recover_ok >= self.source_recover_threshold:
+                        self.active_source = "primary"
+                        self.source_fail["primary"] = 0
+                        self.source_recover_ok = 0
+                        self.primary_recheck_needed = True
+                        self._send_anomaly("主源恢复：已切回 MT5", impact="行情恢复，切回 MT5 主源")
+                else:
+                    self.source_recover_ok = 0
             try:
-                self._process_symbol(symbol, df, quote)
+                self._process_symbol(symbol, df, quote, use_backup=use_backup, price_ok=price_ok, deviation=deviation)
             except Exception as exc:
                 traceback.print_exc()
                 self._send_anomaly(f"行情拉取失败：{exc}", impact=f"{symbol} 无法更新K线")
+        if self.primary_recheck_needed and self.active_source == "primary":
+            self._recheck_positions_with_primary(symbols)
+            self.primary_recheck_needed = False
         self._maybe_send_daily_summary()
 
     def run_heartbeat(self, symbols: List[str]) -> None:
@@ -114,25 +171,44 @@ class LiveOrchestrator:
         - 涓嶅仛锛氭柊淇″彿鐢熸垚/妯″紡鍛婅/缁╂晥姹囨€荤瓑閲嶄换鍔★紝鍑忓皯鏃犳晥璋冪敤涓庢垚鏈€?
         """
         for symbol in symbols:
-            quote, market_open = self._check_market_open(symbol)
+            use_backup = self.active_source == "backup"
+            quote, market_open = self._check_market_open(symbol, use_backup=use_backup)
             if not market_open:
                 print(f"[info] {symbol} market closed / on break")
                 continue
             try:
-                df = self.fetcher.fetch_dataframe(symbol)
+                df = self.fetcher.fetch_dataframe(symbol, use_backup=use_backup)
                 if df.empty:
                     continue
                 multi = self.pipeline.from_dataframe(symbol, df)
                 latest_row = df.iloc[-1]
                 feature_ctx = compute_feature_context(multi.frames)
-                self._check_exit_events(symbol, latest_row)
-                self._handle_reviews(symbol, feature_ctx, latest_row)
+                price_ok, deviation = self._check_price_deviation(symbol, quote, use_backup)
+                self._check_exit_events(symbol, latest_row, observe_only=use_backup and (not price_ok), deviation_note=deviation, source_tag=self._source_tag(use_backup))
+                self._handle_reviews(
+                    symbol,
+                    feature_ctx,
+                    latest_row,
+                    observe_only=use_backup and (not price_ok),
+                    deviation_note=deviation,
+                    source_tag=self._source_tag(use_backup),
+                )
             except Exception as exc:
                 traceback.print_exc()
                 self._send_anomaly(f"行情拉取失败：{exc}", impact=f"{symbol} 无法更新K线")
 
-    def _process_symbol(self, symbol: str, df: pd.DataFrame, quote: Optional[Dict[str, float]] = None) -> None:
-        multi = self.pipeline.from_dataframe(symbol, df)
+    def _process_symbol(
+        self,
+        symbol: str,
+        df: pd.DataFrame,
+        quote: Optional[Dict[str, float]] = None,
+        use_backup: bool = False,
+        price_ok: bool = True,
+        deviation: float = 0.0,
+    ) -> None:
+        source_tag = self._source_tag(use_backup)
+        extra_frames = self.fetcher.fetch_timeframes(symbol, ["1h", "4h", "1d"], use_backup=use_backup)
+        multi = self.pipeline.from_dataframe(symbol, df, extra_frames=extra_frames)
         symbol_spec = self.cfg.symbol_settings.get(symbol)
         if self.db and self.db.kline_writer:
             self.db.kline_writer.record_frames(symbol, multi.frames)
@@ -143,8 +219,9 @@ class LiveOrchestrator:
         feature_ctx = compute_feature_context(multi.frames)
         self._handle_mode_alert(symbol, feature_ctx.market_mode, feature_ctx.environment)
         latest_row = df.iloc[-1]
-        self._check_exit_events(symbol, latest_row)
-        self._handle_reviews(symbol, feature_ctx, latest_row)
+        observe_only = bool(use_backup and (not price_ok))
+        self._check_exit_events(symbol, latest_row, observe_only=observe_only, deviation_note=deviation, source_tag=self._source_tag(use_backup))
+        self._handle_reviews(symbol, feature_ctx, latest_row, observe_only=observe_only, deviation_note=deviation, source_tag=self._source_tag(use_backup))
         now = datetime.now(timezone.utc)
         if self.safe_mode_enabled and self.safe_mode and not self.safe_mode.can_trade(now):
             print(f"[info] safe mode active, skip new opens for {symbol}")
@@ -216,7 +293,7 @@ class LiveOrchestrator:
                 watch_payload = WatchPayload(
                     symbol=symbol,
                     reason=(
-                        f"GLM 棰勮繃婊わ細{reason} "
+                        f"[{source_tag}] GLM 棰勮繃婊わ細{reason} "
                         f"(trend={glm_result.trend_consistency}, vol={glm_result.volatility_status}, "
                         f"struct={glm_result.structure_relevance}, pattern={glm_result.pattern_candidate})"
                     ),
@@ -243,7 +320,7 @@ class LiveOrchestrator:
                 reason = f"Qwen 预过滤：{reason}（未调用 DeepSeek）"
             watch_payload = WatchPayload(
                 symbol=symbol,
-                reason=reason,
+                reason=f"[{source_tag}] {reason}",
                 market_note=feature_ctx.reason,
                 confidence=decision.confidence if getattr(decision, "confidence", None) is not None else None,
                 next_check=datetime.now(timezone.utc) + timedelta(minutes=self.cfg.signals.review_interval_minutes),
@@ -263,6 +340,17 @@ class LiveOrchestrator:
         validation = validate_signal(decision, vctx)
         if not validation.ok:
             return
+        if use_backup and ((not self.allow_backup_open) or (not price_ok)):
+            reason = "备源模式不新开仓" if not self.allow_backup_open else f"备源价差 {deviation*100:.2f}% 超阈值，暂停新开仓"
+            watch_payload = WatchPayload(
+                symbol=symbol,
+                reason=f"[{source_tag}] {reason}",
+                market_note=feature_ctx.reason,
+                confidence=decision.confidence,
+                next_check=datetime.now(timezone.utc) + timedelta(minutes=self.cfg.signals.review_interval_minutes),
+            )
+            send_watch_card(self.webhook, watch_payload)
+            return
         now = datetime.now(timezone.utc)
         cooldown = timedelta(minutes=self.cfg.signals.cooldown_minutes or 0)
         if cooldown and decision.decision in ("open_long", "open_short"):
@@ -276,7 +364,7 @@ class LiveOrchestrator:
             LOGGER.info("skip open: %s existing=%s limit=%s", symbol, len(existing_positions), max_same)
             watch_payload = WatchPayload(
                 symbol=symbol,
-                reason=f"已有 {len(existing_positions)} 笔持仓，超过上限 {max_same}",
+                reason=f"[{source_tag}] 已有 {len(existing_positions)} 笔持仓，超过上限 {max_same}",
                 market_note=feature_ctx.reason,
                 confidence=decision.confidence,
                 next_check=datetime.now(timezone.utc) + timedelta(minutes=self.cfg.signals.review_interval_minutes),
@@ -285,7 +373,7 @@ class LiveOrchestrator:
             return
         if quote is None:
             try:
-                quote = self.fetcher.fetch_price(symbol)
+                quote = self.fetcher.fetch_price(symbol, use_backup=use_backup)
             except Exception:
                 quote = {}
         entry_price = decision.entry_price
@@ -312,6 +400,7 @@ class LiveOrchestrator:
             expires_at=expires,
             notes=[],
         )
+        record.notes.append(f"source={source_tag}")
         correlated = self.signal_manager.correlated_warning(symbol, decision.decision)
         self.signal_manager.add(record)
         signal_id = f"{record.symbol}-{int(record.created_at.timestamp())}"
@@ -387,7 +476,7 @@ class LiveOrchestrator:
             self.db.trading.upsert_position(position)
         send_signal_card(self.webhook, record, correlated)
 
-    def _check_exit_events(self, symbol: str, candle: pd.Series) -> None:
+    def _check_exit_events(self, symbol: str, candle: pd.Series, observe_only: bool = False, deviation_note: Optional[float] = None, source_tag: str = "MT5") -> None:
         high = candle["high"]
         low = candle["low"]
         now = datetime.now(timezone.utc)
@@ -414,6 +503,20 @@ class LiveOrchestrator:
                     reason = "姝㈢泩瑙﹀彂"
                     exit_type = "take_profit"
             if triggered is not None:
+                if observe_only:
+                    watch_payload = WatchPayload(
+                        symbol=symbol,
+                        reason=(
+                            f"[{source_tag}] 备源价差 {deviation_note*100:.2f}% 超阈值，{exit_type or '止盈/止损'}仅提醒未执行"
+                            if deviation_note is not None
+                            else f"[{source_tag}] 备源模式仅提醒，不自动平仓"
+                        ),
+                        market_note=f"触发价 {triggered} stop={pos.stop} take={pos.take} side={pos.side}",
+                        confidence=None,
+                        next_check=datetime.now(timezone.utc) + timedelta(minutes=self.cfg.signals.review_interval_minutes),
+                    )
+                    send_watch_card(self.webhook, watch_payload)
+                    continue
                 duration = self._format_duration(now - pos.created_at)
                 payload = self.state.close_position(symbol, pos.id, triggered, exit_type, reason, duration)
                 if payload:
@@ -456,7 +559,7 @@ class LiveOrchestrator:
                         self._handle_safe_mode_stop(now)
                     self._publish_performance()
 
-    def _handle_reviews(self, symbol: str, feature_ctx, candle: pd.Series) -> None:
+    def _handle_reviews(self, symbol: str, feature_ctx, candle: pd.Series, observe_only: bool = False, deviation_note: Optional[float] = None, source_tag: str = "MT5") -> None:
         atr_key = f"atr_{self.cfg.timeframes.filter_fast}"
         atr_val = feature_ctx.features.get(atr_key, 0.0)
         price = candle["close"]
@@ -468,11 +571,31 @@ class LiveOrchestrator:
                 reverse_move = max(0.0, pos.entry - price)  # 澶氬ご鐨勯€嗗悜涓轰笅璺?
             else:
                 reverse_move = max(0.0, price - pos.entry)  # 绌哄ご鐨勯€嗗悜涓轰笂娑?
+            need_review = False
             if atr_val and reverse_move >= atr_val * atr_threshold:
-                self._trigger_review(symbol, pos, feature_ctx, price)
+                need_review = True
             elif (datetime.now(timezone.utc) - pos.last_review_at) >= timedelta(minutes=interval):
-                # 甯歌澶嶈瘎锛堜笌鎵ц涓诲懆鏈熷榻愶紝鐢辫皟搴︿繚璇?30m 杈圭晫浼氳Е鍙戣璺緞锛?
-                self._trigger_review(symbol, pos, feature_ctx, price)
+                need_review = True
+            if not need_review:
+                continue
+            if observe_only:
+                note = (
+                    f"备源价差 {deviation_note*100:.2f}% 超阈值，复评仅提醒未执行"
+                    if deviation_note is not None
+                    else "备源模式复评仅提醒未执行"
+                )
+                watch_payload = WatchPayload(
+                    symbol=symbol,
+                    reason=f"[{source_tag}] {note}",
+                    market_note=feature_ctx.reason,
+                    confidence=None,
+                    next_check=datetime.now(timezone.utc) + timedelta(minutes=interval),
+                )
+                send_watch_card(self.webhook, watch_payload)
+                # 刷新复评时间，避免高频重复提醒
+                self.state.update_position_levels(symbol, pos.id)
+                continue
+            self._trigger_review(symbol, pos, feature_ctx, price)
 
     def _trigger_review(self, symbol: str, position: PositionState, feature_ctx, price: float) -> None:
         payload = {
@@ -534,7 +657,7 @@ class LiveOrchestrator:
                 close_price=price,
                 pnl=(price - position.entry) if position.side == "open_long" else (position.entry - price),
                 rr=position.rr,
-                reason=decision.reason,
+                reason=f"[{self._source_tag(self.active_source == 'backup')}] {decision.reason}",
                 context=decision.context_summary or "澶嶈瘎瑙﹀彂",
                 confidence=getattr(decision, "confidence", 80.0),
                 action="鎻愬墠骞充粨",
@@ -589,13 +712,13 @@ class LiveOrchestrator:
                     new_take=new_take,
                     old_rr=old_rr,
                     new_rr=new_rr,
-                    reason=decision.reason,
-                    market_update="澶嶈瘎璋冩暣",
+                    reason=f"[{self._source_tag(self.active_source == 'backup')}] {decision.reason}",
+                    market_update=f"[{self._source_tag(self.active_source == 'backup')}] 澶嶈瘎璋冩暣",
                     next_review=datetime.now(timezone.utc) + timedelta(minutes=self.cfg.signals.review_interval_minutes),
                 )
                 send_review_adjust_card(self.webhook, review_payload)
 
-    def _check_market_open(self, symbol: str) -> tuple[Dict[str, float], bool]:
+    def _check_market_open(self, symbol: str, use_backup: bool = False) -> tuple[Dict[str, float], bool]:
         """
         Detect simple market break/closed periods to avoid wasting API/DeepSeek calls.
         - BTCUSDm 瑙嗕负 24h 寮€甯傘€?
@@ -606,7 +729,7 @@ class LiveOrchestrator:
             return {}, True
         quote: Dict[str, float] = {}
         try:
-            quote = self.fetcher.fetch_price(symbol) or {}
+            quote = self.fetcher.fetch_price(symbol, use_backup=use_backup) or {}
             self.last_quotes[symbol] = quote
         except Exception:
             return {}, False
@@ -704,6 +827,20 @@ class LiveOrchestrator:
         # AI 鍏ㄦ潈鍐崇瓥锛屽叧闂熀浜庤〃鐜板浜哄伐闃堝€肩殑鑷姩寰皟銆?
         return
 
+    def _recheck_positions_with_primary(self, symbols: List[str]) -> None:
+        """主源恢复后，用主源价重新复核持仓/止盈止损，避免备源基准偏移。"""
+        for symbol in symbols:
+            try:
+                df = self.fetcher.fetch_dataframe(symbol, use_backup=False)
+                if df.empty:
+                    continue
+                quote = self.fetcher.fetch_price(symbol, use_backup=False) or {}
+                price_ok, deviation = True, 0.0
+                self._process_symbol(symbol, df, quote, use_backup=False, price_ok=price_ok, deviation=deviation)
+            except Exception as exc:
+                LOGGER.warning("recheck_primary_failed symbol=%s err=%s", symbol, exc)
+                continue
+
     @staticmethod
     def _format_duration(delta: timedelta) -> str:
         total_minutes = int(delta.total_seconds() // 60)
@@ -728,6 +865,99 @@ class LiveOrchestrator:
             return
         self.paper_broker.adjust(trade_id, new_stop=new_stop, new_take=new_take, note=note)
 
+    def _check_data_health(self, df: pd.DataFrame) -> tuple[bool, str]:
+        if df.empty:
+            return False, "行情为空"
+        last_ts = df.index[-1]
+        if getattr(last_ts, "tzinfo", None) is None:
+            last_ts = last_ts.tz_localize(timezone.utc)
+        now = datetime.now(timezone.utc)
+        age = now - last_ts
+        tolerance = timedelta(minutes=max(self.base_minutes * 2, 5))
+        if age > tolerance:
+            return False, f"最新K线过旧 age={age} last={last_ts.isoformat()}"
+        if self.required_base_bars and len(df) < self.required_base_bars:
+            return False, f"底层K线不足 {len(df)}/{self.required_base_bars}，高周期无法判定"
+        return True, ""
+
+    def _alert_data_issue(self, symbol: str, code: str, detail: str) -> None:
+        now = datetime.now(timezone.utc)
+        key = f"{symbol}:{code}"
+        last = self.last_data_alert.get(key)
+        if last and (now - last) < timedelta(minutes=5):
+            return
+        self.last_data_alert[key] = now
+        self._send_anomaly(f"行情异常 {symbol}: {detail}", impact=f"{symbol} 行情不可用，已跳过开仓")
+
+    def _check_price_deviation(self, symbol: str, quote: Optional[Dict[str, float]], use_backup: bool) -> tuple[bool, float]:
+        if not use_backup:
+            return True, 0.0
+        if not quote:
+            try:
+                quote = self.fetcher.fetch_price(symbol, use_backup=True) or {}
+            except Exception:
+                quote = {}
+        primary_quote = self.primary_quotes.get(symbol) or self.last_quotes.get(symbol)
+        if not primary_quote or not quote:
+            return True, 0.0
+        primary_mid = self._mid_price(primary_quote)
+        backup_mid = self._mid_price(quote)
+        if primary_mid <= 0 or backup_mid <= 0:
+            return True, 0.0
+        deviation = abs(backup_mid - primary_mid) / primary_mid
+        return deviation <= self.backup_deviation_pct, deviation
+
+    @staticmethod
+    def _mid_price(quote: Dict[str, float]) -> float:
+        bid = float(quote.get("bid") or 0.0)
+        ask = float(quote.get("ask") or 0.0)
+        last = float(quote.get("last") or 0.0)
+        if bid and ask:
+            return (bid + ask) / 2
+        if last:
+            return last
+        return bid or ask or 0.0
+
+    def _source_tag(self, use_backup: bool) -> str:
+        return self.source_tags["backup" if use_backup else "primary"]
+
+    def _record_source_failure(self, use_backup: bool) -> None:
+        src = "backup" if use_backup else "primary"
+        self.source_fail[src] = self.source_fail.get(src, 0) + 1
+        if src == "primary":
+            self.source_recover_ok = 0
+        if src == "primary" and self.active_source == "primary" and self.source_fail[src] == self.source_fail_threshold:
+            if self.has_backup:
+                self.active_source = "backup"
+                self.source_fail["backup"] = 0
+                self.source_recover_ok = 0
+                self._send_anomaly(
+                    "主行情源连续失败，自动切换备用 CCXT（Binance USDT-M）",
+                    impact="MT5 行情异常，已降级到 CCXT 行情，仅用于决策/纸盘，不触发实盘；价格基于 Binance USDT-M，可能与 MT5 有点差，请留意复评/止盈止损触发差异",
+                )
+            else:
+                self._send_anomaly("主行情源连续失败且无备用源", impact="行情不可用，等待人工恢复")
+        elif src == "backup" and self.source_fail[src] == self.source_fail_threshold:
+            self._send_anomaly("备用行情源连续失败", impact="主/备用行情都不可用，暂停开仓等待人工")
+
+    def _record_source_success(self, use_backup: bool) -> None:
+        src = "backup" if use_backup else "primary"
+        if self.source_fail.get(src, 0):
+            self.source_fail[src] = 0
+        if src == "primary":
+            self.source_recover_ok = 0
+
+    def _probe_primary(self, symbol: str) -> bool:
+        try:
+            df = self.fetcher.fetch_dataframe(symbol, use_backup=False)
+        except Exception:
+            return False
+        if df.empty:
+            return False
+        ok, _ = self._check_data_health(df)
+        if ok:
+            self.source_fail["primary"] = 0
+        return ok
 
 
 

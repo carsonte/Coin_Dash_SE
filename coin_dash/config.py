@@ -78,6 +78,12 @@ class LiveCfg(BaseModel):
     symbols: List[str] = Field(default_factory=lambda: ["BTCUSDm", "XAUUSDm"])
 
 
+class BackupPolicyCfg(BaseModel):
+    # 备用源策略：是否允许备源新开仓、价差阈值（相对主源最后价）
+    allow_backup_open: bool = False
+    deviation_pct: float = 0.0025  # 0.25%
+
+
 class DeepSeekCfg(BaseModel):
     enabled: bool = False
     model: str = "deepseek-chat"
@@ -195,6 +201,7 @@ class AppConfig(BaseModel):
     notifications: NotificationsCfg = Field(default_factory=NotificationsCfg)
     log: LogCfg = Field(default_factory=LogCfg)
     event_triggers: EventTriggersCfg = Field(default_factory=EventTriggersCfg)
+    backup_policy: BackupPolicyCfg = Field(default_factory=BackupPolicyCfg)
     # qwen_filter 为主字段，glm_filter 兼容旧字段；load_config 会同步
     qwen_filter: GLMFilterCfg = Field(default_factory=GLMFilterCfg)
     glm_filter: GLMFilterCfg = Field(default_factory=GLMFilterCfg)
@@ -207,6 +214,7 @@ def load_config(path: Optional[Path] = None) -> AppConfig:
     # Ensure nested defaults exist
     data.setdefault("data", {})
     data.setdefault("live", {})
+    data.setdefault("backup_policy", {})
     data.setdefault("symbol_settings", {})
     if not data["symbol_settings"]:
         for sym in data.get("symbols", []):
