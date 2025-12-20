@@ -59,7 +59,7 @@ def run_backtest(
             cfg.deepseek,
             glm_cfg=cfg.qwen_filter,
             glm_client_cfg=cfg.llm.qwen,
-            glm_fallback_cfg=cfg.llm.qwen_fallback,
+            glm_fallback_cfg=cfg.llm.glm_fallback,
             decision_logger=decision_logger,
         )
         if use_deepseek
@@ -67,7 +67,7 @@ def run_backtest(
     )
     glm_filter_enabled = bool(getattr(cfg, "glm_filter", None) and cfg.qwen_filter.enabled)
     glm_prefilter = (
-        PreFilterClient(cfg.qwen_filter, glm_client_cfg=cfg.llm.qwen, glm_fallback_cfg=cfg.llm.qwen_fallback)
+        PreFilterClient(cfg.qwen_filter, glm_client_cfg=cfg.llm.qwen, glm_fallback_cfg=cfg.llm.glm_fallback)
         if glm_filter_enabled
         else None
     )
