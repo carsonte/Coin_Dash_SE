@@ -307,10 +307,17 @@ def send_performance_card(webhook: str, summary: Dict, modes: Dict, trade_types:
             )
         elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(mode_lines)}})
     if trade_types:
+        type_labels = {
+            "trend": "顺势",
+            "reverse_minor": "逆小势",
+            "reverse_major": "逆大势",
+            "unknown": "未分类",
+        }
         type_lines = ["**按交易类型**"]
         for name, stats in trade_types.items():
+            label = type_labels.get(str(name).lower(), name)
             type_lines.append(
-                f"- {name}: 胜率 {stats.get('win_rate', 0):.1%} | 平均RR {stats.get('avg_rr', 0):.2f} | 盈亏 {stats.get('pnl', 0):.2f}"
+                f"- {label}: 胜率 {stats.get('win_rate', 0):.1%} | 平均RR {stats.get('avg_rr', 0):.2f} | 盈亏 {stats.get('pnl', 0):.2f}"
             )
         elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(type_lines)}})
     if symbols:
