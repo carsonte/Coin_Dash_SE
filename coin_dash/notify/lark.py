@@ -6,6 +6,7 @@ import hmac
 import logging
 import os
 import time
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, Sequence
@@ -131,6 +132,29 @@ def _sign_payload(secret: str) -> Dict[str, str]:
     return {"timestamp": ts, "sign": signature}
 
 
+def _clean_text(value: str) -> str:
+    text = unicodedata.normalize("NFKC", value)
+    cleaned = []
+    for ch in text:
+        category = unicodedata.category(ch)
+        if category == "Cc" and ch not in ("\n", "\t"):
+            continue
+        if category == "Cf":
+            continue
+        cleaned.append(ch)
+    return "".join(cleaned)
+
+
+def _sanitize_payload(obj: Any) -> Any:
+    if isinstance(obj, str):
+        return _clean_text(obj)
+    if isinstance(obj, list):
+        return [_sanitize_payload(item) for item in obj]
+    if isinstance(obj, dict):
+        return {key: _sanitize_payload(value) for key, value in obj.items()}
+    return obj
+
+
 def _post(webhook: str, card: Dict) -> None:
     if not webhook:
         return
@@ -138,7 +162,8 @@ def _post(webhook: str, card: Dict) -> None:
     secret = _SIGNING_SECRET
     if secret:
         payload.update(_sign_payload(secret))
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    payload = _sanitize_payload(payload)
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8", errors="replace")
     headers = {"Content-Type": "application/json; charset=utf-8"}
     try:
         resp = requests.post(
