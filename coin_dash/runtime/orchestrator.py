@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 import logging
+import time
 import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -368,18 +369,23 @@ class LiveOrchestrator:
             )
             send_watch_card(self.webhook, watch_payload)
             return
-        if not quote:
-            try:
-                quote = self.fetcher.fetch_price(symbol, use_backup=use_backup)
-            except Exception:
-                quote = {}
         entry_price = decision.entry_price
         market_price = 0.0
-        if quote:
+        for attempt in range(3):
+            current_quote = quote if attempt == 0 and quote else {}
+            if not current_quote:
+                try:
+                    current_quote = self.fetcher.fetch_price(symbol, use_backup=use_backup)
+                except Exception:
+                    current_quote = {}
             if decision.decision == "open_long":
-                market_price = float(quote.get("ask") or quote.get("last") or 0.0)
+                market_price = float(current_quote.get("ask") or current_quote.get("last") or 0.0)
             else:
-                market_price = float(quote.get("bid") or quote.get("last") or 0.0)
+                market_price = float(current_quote.get("bid") or current_quote.get("last") or 0.0)
+            if market_price > 0:
+                break
+            if attempt < 2:
+                time.sleep(0.2)
         if market_price > 0:
             entry_price = market_price
         else:
