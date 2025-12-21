@@ -99,9 +99,9 @@ market_filter:
 
 risk:
   risk_per_trade: 0.01        # 单笔风险占净值比例（AI仓位不指定时的兜底算法）
-  validation_enabled: false   # 是否启用本地风控校验（价格顺序/RR 边界），默认关闭
+  validation_enabled: true    # 是否启用本地风控校验（价格顺序/RR 边界）
   rr_bounds:
-    min: 1.5
+    min: 0.75
     max: 5.0
   sl_atr_mult: 1.5
   tp_atr_mult: 3.0

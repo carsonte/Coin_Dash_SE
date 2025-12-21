@@ -337,9 +337,6 @@ class LiveOrchestrator:
             structure=feature_ctx.structure,
             risk_cfg=self.cfg.risk,
         )
-        validation = validate_signal(decision, vctx)
-        if not validation.ok:
-            return
         if use_backup and ((not self.allow_backup_open) or (not price_ok)):
             reason = "备源模式不新开仓" if not self.allow_backup_open else f"备源价差 {deviation*100:.2f}% 超阈值，暂停新开仓"
             watch_payload = WatchPayload(
@@ -371,18 +368,35 @@ class LiveOrchestrator:
             )
             send_watch_card(self.webhook, watch_payload)
             return
-        if quote is None:
+        if not quote:
             try:
                 quote = self.fetcher.fetch_price(symbol, use_backup=use_backup)
             except Exception:
                 quote = {}
         entry_price = decision.entry_price
+        market_price = 0.0
         if quote:
             if decision.decision == "open_long":
-                entry_price = float(quote.get("ask") or entry_price)
+                market_price = float(quote.get("ask") or quote.get("last") or 0.0)
             else:
-                entry_price = float(quote.get("bid") or entry_price)
+                market_price = float(quote.get("bid") or quote.get("last") or 0.0)
+        if market_price > 0:
+            entry_price = market_price
+        else:
+            watch_payload = WatchPayload(
+                symbol=symbol,
+                reason=f"[{source_tag}] 行情报价缺失，跳过开仓",
+                market_note=feature_ctx.reason,
+                confidence=decision.confidence,
+                next_check=datetime.now(timezone.utc) + timedelta(minutes=self.cfg.signals.review_interval_minutes),
+            )
+            send_watch_card(self.webhook, watch_payload)
+            return
         decision.entry_price = entry_price  # 用成交价估计做保证金/风险计算
+        decision.recompute_rr()
+        validation = validate_signal(decision, vctx)
+        if not validation.ok:
+            return
         plan = position_size(self.paper_broker.available_equity, decision, trade_type, self.cfg.risk, spec=symbol_spec)
         if plan.qty <= 0:
             LOGGER.info("skip open %s: plan_qty=0 note=%s", symbol, plan.note)
