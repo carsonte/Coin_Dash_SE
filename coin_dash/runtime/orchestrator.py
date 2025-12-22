@@ -523,6 +523,7 @@ class LiveOrchestrator:
                     reason = "止盈触发"
                     exit_type = "take_profit"
             if triggered is not None:
+                actual_rr = pos.realized_rr(triggered)
                 if observe_only:
                     watch_payload = WatchPayload(
                         symbol=symbol,
@@ -552,7 +553,7 @@ class LiveOrchestrator:
                             "side": pos.side,
                             "exit_type": exit_type,
                             "exit_price": triggered,
-                            "rr": pos.rr,
+                            "rr": actual_rr,
                             "time": now_ts,
                             "reason": reason,
                         },
@@ -561,7 +562,7 @@ class LiveOrchestrator:
                         {
                             "type": "self_critique",
                             "symbol": symbol,
-                            "summary": f"关闭仓位 side={pos.side} exit={exit_type} rr={pos.rr}",
+                            "summary": f"关闭仓位 side={pos.side} exit={exit_type} rr={actual_rr}",
                         }
                     )
                     if self.db and self.db.trading:
@@ -573,7 +574,7 @@ class LiveOrchestrator:
                             entry_price=pos.entry,
                             exit_price=triggered,
                             reason=reason,
-                            rr=pos.rr,
+                            rr=actual_rr,
                         )
                     if exit_type == "stop_loss":
                         self._handle_safe_mode_stop(now)
@@ -656,6 +657,7 @@ class LiveOrchestrator:
             self.state.update_position_levels(symbol, position.id)
             return
         if decision.action == "close":
+            actual_rr = position.realized_rr(price)
             duration = self._format_duration(datetime.now(timezone.utc) - position.created_at)
             self.state.close_position(symbol, position.id, price, "review_close", decision.reason, duration)
             self._close_paper_trade(position.id, price, "review_close", int(datetime.now(timezone.utc).timestamp()))
@@ -668,7 +670,7 @@ class LiveOrchestrator:
                     entry_price=position.entry,
                     exit_price=price,
                     reason="review_close",
-                    rr=position.rr,
+                    rr=actual_rr,
                 )
             review_payload = ReviewClosePayload(
                 symbol=symbol,
@@ -676,7 +678,7 @@ class LiveOrchestrator:
                 entry_price=position.entry,
                 close_price=price,
                 pnl=(price - position.entry) if position.side == "open_long" else (position.entry - price),
-                rr=position.rr,
+                rr=actual_rr,
                 reason=f"[{self._source_tag(self.active_source == 'backup')}] {decision.reason}",
                 context=decision.context_summary or "复评触发",
                 confidence=getattr(decision, "confidence", 80.0),
@@ -712,6 +714,15 @@ class LiveOrchestrator:
             new_rr = decision.new_rr if decision.new_rr is not None else computed_rr
             if new_rr <= 0:
                 new_rr = computed_rr
+            planned_rr = position.planned_rr if position.planned_rr else old_rr
+            atr_key = f"atr_{self.cfg.timeframes.filter_fast}"
+            atr_val = feature_ctx.features.get(atr_key, 0.0)
+            risk_dist = abs(position.entry - new_stop)
+            remaining_rr_note = None
+            remaining_rr = computed_rr
+            if atr_val and risk_dist <= (0.1 * atr_val):
+                remaining_rr_note = "保本/锁盈"
+                remaining_rr = None
             has_change = (new_stop != old_stop) or (new_take != old_take) or (new_rr != old_rr)
             if not has_change:
                 # 仅刷新复评时间，避免无效卡片
@@ -730,11 +741,12 @@ class LiveOrchestrator:
                     new_stop=new_stop,
                     old_take=old_take,
                     new_take=new_take,
-                    old_rr=old_rr,
-                    new_rr=new_rr,
                     reason=f"[{self._source_tag(self.active_source == 'backup')}] {decision.reason}",
                     market_update=f"[{self._source_tag(self.active_source == 'backup')}] 复评调整",
                     next_review=datetime.now(timezone.utc) + timedelta(minutes=self.cfg.signals.review_interval_minutes),
+                    planned_rr=planned_rr,
+                    remaining_rr=remaining_rr,
+                    remaining_rr_note=remaining_rr_note,
                 )
                 send_review_adjust_card(self.webhook, review_payload)
 

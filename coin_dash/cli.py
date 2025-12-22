@@ -794,11 +794,11 @@ def cmd_cards_test(args: argparse.Namespace) -> None:
 
 
 
-        old_rr=2.0,
+        planned_rr=2.0,
 
 
 
-        new_rr=2.3,
+        remaining_rr=2.3,
 
 
 
@@ -1386,6 +1386,7 @@ def cmd_close_all(args: argparse.Namespace) -> None:
     webhook = cfg.notifications.lark_webhook
     for symbol in symbols:
         for pos in list(state.list_positions(symbol)):
+            actual_rr = pos.realized_rr(pos.entry)
             payload = state.close_position(
                 symbol=symbol,
                 position_id=pos.id,
@@ -1405,7 +1406,7 @@ def cmd_close_all(args: argparse.Namespace) -> None:
                         entry_price=pos.entry,
                         exit_price=pos.entry,
                         reason="manual_close",
-                        rr=pos.rr,
+                        rr=actual_rr,
                     )
 
 

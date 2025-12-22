@@ -92,6 +92,7 @@ class TradingRecorder:
         exit_price = trade.exit_price
         if exit_price is None:
             exit_price = trade.take if trade.exit_reason == "take profit" else trade.stop
+        actual_rr = trade.realized_rr if trade.realized_rr is not None else trade.rr
         update = {
             "run_id": run_id or self.run_id,
             "exit_price": exit_price,
@@ -99,6 +100,7 @@ class TradingRecorder:
             "exit_at": utc_now(),
             "pnl": trade.pnl,
             "status": "closed",
+            "rr": actual_rr,
         }
         with self.client.session() as session:
             if session is None:

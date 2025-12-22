@@ -17,6 +17,8 @@ class Trade:
     trade_type: str
     market_mode: str
     rr: float
+    initial_stop: float = 0.0
+    realized_rr: Optional[float] = None
     margin_used: float = 0.0
     closed_at: Optional[int] = None
     pnl: float = 0.0
@@ -71,6 +73,7 @@ class PaperBroker:
             trade_type=trade_type,
             market_mode=mode,
             rr=rr,
+            initial_stop=stop,
             margin_used=margin_required,
         )
         self.trades.append(t)
@@ -115,6 +118,7 @@ class PaperBroker:
                 t.closed_at = ts
                 t.exit_reason = reason
                 t.exit_price = exit_price
+                t.realized_rr = self._calc_realized_rr(t, exit_price)
                 t.record(f"close {reason} price={exit_price:.2f} pnl={pnl:.2f}")
 
     def close(self, trade_id: str, price: float, ts: int, reason: str) -> Optional[Trade]:
@@ -133,8 +137,22 @@ class PaperBroker:
         trade.closed_at = ts
         trade.exit_reason = reason
         trade.exit_price = price
+        trade.realized_rr = self._calc_realized_rr(trade, price)
         trade.record(f"close {reason} price={price:.2f} pnl={pnl:.2f}")
         return trade
+
+    @staticmethod
+    def _calc_realized_rr(trade: Trade, exit_price: float) -> float:
+        base_stop = trade.initial_stop if trade.initial_stop else trade.stop
+        if trade.side == "open_long":
+            risk = trade.entry - base_stop
+            reward = exit_price - trade.entry
+        else:
+            risk = base_stop - trade.entry
+            reward = trade.entry - exit_price
+        if risk <= 0:
+            return trade.rr
+        return reward / risk
 
     def summary(self) -> dict:
         closed = [t for t in self.trades if t.closed_at is not None]

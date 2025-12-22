@@ -52,11 +52,12 @@ class ReviewAdjustPayload:
     new_stop: float
     old_take: float
     new_take: float
-    old_rr: float
-    new_rr: float
     reason: str
     market_update: str
     next_review: datetime
+    planned_rr: float
+    remaining_rr: float | None = None
+    remaining_rr_note: str | None = None
 
 
 @dataclass
@@ -375,6 +376,11 @@ def send_review_close_card(webhook: str, payload: ReviewClosePayload) -> None:
 
 
 def send_review_adjust_card(webhook: str, payload: ReviewAdjustPayload) -> None:
+    remaining_rr = (
+        payload.remaining_rr_note
+        if payload.remaining_rr_note
+        else f"{payload.remaining_rr:.2f}" if payload.remaining_rr is not None else "-"
+    )
     card = {
         "config": {"wide_screen_mode": True, "enable_forward": True},
         "header": {
@@ -402,8 +408,8 @@ def send_review_adjust_card(webhook: str, payload: ReviewAdjustPayload) -> None:
             {
                 "tag": "column_set",
                 "columns": [
-                    _column("原RR", f"{payload.old_rr:.2f}"),
-                    _column("新RR", f"{payload.new_rr:.2f}"),
+                    _column("计划RR", f"{payload.planned_rr:.2f}"),
+                    _column("剩余RR", remaining_rr),
                     _column("下次复评", _fmt_local(payload.next_review)),
                 ],
             },

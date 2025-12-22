@@ -241,7 +241,8 @@ def _record_closed_trades(
     triggered = False
     for trade in broker.trades:
         if trade.closed_at is not None and trade.trade_id not in recorded:
-            tracker.record(trade, trade.trade_type, trade.rr, trade.market_mode)
+            rr_value = trade.realized_rr if trade.realized_rr is not None else trade.rr
+            tracker.record(trade, trade.trade_type, rr_value, trade.market_mode)
             recorded.add(trade.trade_id)
             if db_services:
                 if db_services.trading:

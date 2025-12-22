@@ -45,9 +45,27 @@ class PositionState:
     created_at: datetime
     updated_at: datetime
     last_review_at: datetime
+    initial_stop: float = 0.0
+    planned_rr: float = 0.0
     qty: float = 0.0
     status: str = "open"
     closed_at: Optional[datetime] = None
+
+    def realized_rr(self, exit_price: float) -> float:
+        """
+        Compute realized R-multiple based on the initial risk (entry vs initial_stop).
+        Falls back to planned_rr if the risk distance is invalid.
+        """
+        base_stop = self.initial_stop if self.initial_stop > 0 else self.stop
+        if self.side == "open_long":
+            risk = self.entry - base_stop
+            reward = exit_price - self.entry
+        else:
+            risk = base_stop - self.entry
+            reward = self.entry - exit_price
+        if risk <= 0:
+            return self.planned_rr if self.planned_rr else self.rr
+        return reward / risk
 
     def to_record(self) -> Dict:
         record = asdict(self)
@@ -67,6 +85,8 @@ class PositionState:
             stop=record["stop"],
             take=record["take"],
             rr=record.get("rr", 0.0),
+            initial_stop=record.get("initial_stop", record.get("stop", 0.0)),
+            planned_rr=record.get("planned_rr", record.get("rr", 0.0)),
             trade_type=record.get("trade_type", "trend"),
             market_mode=record.get("market_mode", "mixed"),
             created_at=_parse_dt(record.get("created_at")) or _utc_now(),
@@ -167,6 +187,8 @@ class StateManager:
             created_at=now,
             updated_at=now,
             last_review_at=now,
+            initial_stop=stop,
+            planned_rr=rr,
             qty=qty,
         )
         self._positions.setdefault(symbol, []).append(pos)
@@ -225,11 +247,15 @@ class StateManager:
         else:
             price_diff = (exit_price - pos.entry) if pos.side == "open_long" else (pos.entry - exit_price)
             pnl = price_diff * qty
+        actual_rr = pos.realized_rr(exit_price)
+        planned_rr = pos.planned_rr if pos.planned_rr else pos.rr
         record = {
             "symbol": pos.symbol,
             "trade_type": pos.trade_type,
             "market_mode": pos.market_mode,
-            "rr": pos.rr,
+            "rr": actual_rr,
+            "planned_rr": planned_rr,
+            "initial_stop": pos.initial_stop if pos.initial_stop else pos.stop,
             "pnl": pnl,
             "exit_type": exit_type,
             "closed_at": _serialize_dt(pos.closed_at),
@@ -243,7 +269,7 @@ class StateManager:
             entry_price=pos.entry,
             exit_price=exit_price,
             pnl=pnl,
-            rr=pos.rr,
+            rr=actual_rr,
             duration=duration,
             reason=reason,
             exit_type=exit_type,
