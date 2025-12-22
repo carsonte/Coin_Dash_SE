@@ -20,6 +20,7 @@ Coin Dash 是一套多周期数字货币/黄金的自动化交易决策链，核
 - 备源安全：备源默认不新开仓，可配置 `backup_policy.allow_backup_open`；价差护栏 `deviation_pct`（默认 0.25%）超阈值时，新开仓/自动平仓都会暂停并仅提醒，卡片会标注当前源与点差风险。
 - 卡片源标签：信号/复评/观望/价差提醒卡片会携带 `source=MT5` 或 `source=CCXT-Binance`，备源时提示可能存在点差，仅供决策/纸盘。
 - 开仓价格：实时行情会覆盖 AI 给的 entry（多单用 ask，空单用 bid，缺失时用 last）；会重试取价 3 次（200ms 间隔），仍缺失则跳过开仓并发观察卡。
+- 提示词调整：DeepSeek/前置门卫统一价格行为学左侧交易 + 结构优先，入场需靠近结构位（<=0.25*ATR30m）；远离结构（>0.6*ATR30m）必须观望，逆势需高 RR + 轻仓。
 - 风控校验：本地价格顺序与 RR 下限检查启用，最低 RR 默认 0.75（可在 `risk.rr_bounds.min` 调整）。
 - 测试现状：`python -m pytest --disable-warnings` 全量通过；若需加载 .env，可用 `python -m dotenv run -- python -m pytest tests/test_llm_clients_smoke.py --disable-warnings --maxfail=1` 运行 LLM 冒烟。
 - 绩效统计：实时/复评平仓会写入 performance 表；StateManager 基准权益来自 `backtest.initial_equity` 并持久化，重启后统计不漂移。

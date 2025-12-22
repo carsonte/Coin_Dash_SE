@@ -46,7 +46,10 @@ def _build_qwen_kwargs(llm_cfg: Optional["LLMClientsCfg"]) -> Dict[str, Any]:
 
 def _build_messages(symbol: str, payload: Dict[str, Any], role_hint: str) -> list[dict]:
     prompt = (
-        "你是 Coin Dash SE 的{role}，请基于给定的市场特征做交易倾向判断，输出 JSON（不要有额外文本）：\n"
+        "你是 Coin Dash SE 的{role}，请基于给定的市场特征做交易倾向判断。交易风格：价格行为学左侧交易 + 结构优先，不追价。\n"
+        "- 入场必须靠近结构支撑/阻力，使用 ATR30m 判定距离：≤0.25*ATR30m 才可参与；>0.6*ATR30m 视为追价必须 no-trade。\n"
+        "- 逆大势仅在明确反转/假突破/扫单回收时允许，并要求 RR>=2.0 且轻仓。\n"
+        "输出 JSON（不要有额外文本）：\n"
         '{\n  "bias": "long | short | no-trade",\n'
         '  "confidence": 0-1,\n'
         '  "entry": number | null,\n'
