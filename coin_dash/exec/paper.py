@@ -19,6 +19,8 @@ class Trade:
     rr: float
     initial_stop: float = 0.0
     realized_rr: Optional[float] = None
+    open_fee: float = 0.0
+    close_fee: float = 0.0
     margin_used: float = 0.0
     closed_at: Optional[int] = None
     pnl: float = 0.0
@@ -74,6 +76,7 @@ class PaperBroker:
             market_mode=mode,
             rr=rr,
             initial_stop=stop,
+            open_fee=fee,
             margin_used=margin_required,
         )
         self.trades.append(t)
@@ -118,6 +121,7 @@ class PaperBroker:
                 t.closed_at = ts
                 t.exit_reason = reason
                 t.exit_price = exit_price
+                t.close_fee = fee
                 t.realized_rr = self._calc_realized_rr(t, exit_price)
                 t.record(f"close {reason} price={exit_price:.2f} pnl={pnl:.2f}")
 
@@ -137,9 +141,14 @@ class PaperBroker:
         trade.closed_at = ts
         trade.exit_reason = reason
         trade.exit_price = price
+        trade.close_fee = fee
         trade.realized_rr = self._calc_realized_rr(trade, price)
         trade.record(f"close {reason} price={price:.2f} pnl={pnl:.2f}")
         return trade
+
+    @staticmethod
+    def net_pnl(trade: Trade) -> float:
+        return trade.pnl - (trade.open_fee or 0.0)
 
     @staticmethod
     def _calc_realized_rr(trade: Trade, exit_price: float) -> float:
@@ -156,10 +165,11 @@ class PaperBroker:
 
     def summary(self) -> dict:
         closed = [t for t in self.trades if t.closed_at is not None]
-        wins = [t for t in closed if t.pnl > 0]
-        losses = [t for t in closed if t.pnl < 0]
-        total_profit = sum(t.pnl for t in wins)
-        total_loss = abs(sum(t.pnl for t in losses))
+        net_map = {t.trade_id: self.net_pnl(t) for t in closed}
+        wins = [t for t in closed if net_map.get(t.trade_id, 0.0) > 0]
+        losses = [t for t in closed if net_map.get(t.trade_id, 0.0) < 0]
+        total_profit = sum(net_map.get(t.trade_id, 0.0) for t in wins)
+        total_loss = abs(sum(net_map.get(t.trade_id, 0.0) for t in losses))
         profit_factor = (total_profit / total_loss) if total_loss else float("inf") if total_profit else 0.0
         return {
             "equity": self.equity,
@@ -169,6 +179,6 @@ class PaperBroker:
             "closed": len(closed),
             "wins": len(wins),
             "win_rate": (len(wins) / len(closed)) if closed else 0.0,
-            "pnl_total": sum(t.pnl for t in closed),
+            "pnl_total": sum(net_map.values()),
             "profit_factor": profit_factor,
         }

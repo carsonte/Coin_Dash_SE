@@ -16,15 +16,16 @@ class PerformanceAggregator:
         if not self.client.enabled:
             return
         trade_date = utc_now().date()
-        win = 1 if trade.pnl > 0 else 0
-        profit = max(trade.pnl, 0.0)
-        loss = abs(min(trade.pnl, 0.0))
+        pnl_value = trade.pnl - float(getattr(trade, "open_fee", 0.0) or 0.0)
+        win = 1 if pnl_value > 0 else 0
+        profit = max(pnl_value, 0.0)
+        loss = abs(min(pnl_value, 0.0))
         with self.client.session() as session:
             if session is None:
                 return
-            self._update_daily(session, trade_date, trade.symbol, trade.pnl, win, profit, loss)
-            self._update_mode(session, trade_date, trade.symbol, market_mode, trade.pnl, win)
-            self._update_trade_type(session, trade_date, trade.symbol, trade_type, trade.pnl, win)
+            self._update_daily(session, trade_date, trade.symbol, pnl_value, win, profit, loss)
+            self._update_mode(session, trade_date, trade.symbol, market_mode, pnl_value, win)
+            self._update_trade_type(session, trade_date, trade.symbol, trade_type, pnl_value, win)
 
     def _update_daily(self, session, day: date, symbol: str, pnl: float, win: int, profit: float, loss: float) -> None:
         record = (

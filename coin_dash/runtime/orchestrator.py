@@ -539,10 +539,24 @@ class LiveOrchestrator:
                     send_watch_card(self.webhook, watch_payload)
                     continue
                 duration = self._format_duration(now - pos.created_at)
-                payload = self.state.close_position(symbol, pos.id, triggered, exit_type, reason, duration)
+                trade = self._close_paper_trade(pos.id, triggered, exit_type, int(now.timestamp()))
+                realized_pnl = None
+                executed_qty = None
+                if trade:
+                    realized_pnl = trade.pnl - float(getattr(trade, "open_fee", 0.0) or 0.0)
+                    executed_qty = trade.qty
+                payload = self.state.close_position(
+                    symbol,
+                    pos.id,
+                    triggered,
+                    exit_type,
+                    reason,
+                    duration,
+                    realized_pnl=realized_pnl,
+                    executed_qty=executed_qty,
+                )
                 if payload:
                     send_exit_card(self.webhook, payload)
-                    self._close_paper_trade(pos.id, triggered, exit_type, int(now.timestamp()))
                     now_ts = datetime.now(timezone.utc).isoformat()
                     self.deepseek.record_position_event(
                         pos.id,
@@ -575,6 +589,8 @@ class LiveOrchestrator:
                             exit_price=triggered,
                             reason=reason,
                             rr=actual_rr,
+                            executed_qty=executed_qty,
+                            realized_pnl=payload.pnl if payload else None,
                         )
                     if exit_type == "stop_loss":
                         self._handle_safe_mode_stop(now)
@@ -659,8 +675,22 @@ class LiveOrchestrator:
         if decision.action == "close":
             actual_rr = position.realized_rr(price)
             duration = self._format_duration(datetime.now(timezone.utc) - position.created_at)
-            self.state.close_position(symbol, position.id, price, "review_close", decision.reason, duration)
-            self._close_paper_trade(position.id, price, "review_close", int(datetime.now(timezone.utc).timestamp()))
+            trade = self._close_paper_trade(position.id, price, "review_close", int(datetime.now(timezone.utc).timestamp()))
+            realized_pnl = None
+            executed_qty = None
+            if trade:
+                realized_pnl = trade.pnl - float(getattr(trade, "open_fee", 0.0) or 0.0)
+                executed_qty = trade.qty
+            payload = self.state.close_position(
+                symbol,
+                position.id,
+                price,
+                "review_close",
+                decision.reason,
+                duration,
+                realized_pnl=realized_pnl,
+                executed_qty=executed_qty,
+            )
             if self.db and self.db.trading:
                 self.db.trading.upsert_position(position, status="closed")
                 self.db.trading.record_manual_close(
@@ -671,13 +701,15 @@ class LiveOrchestrator:
                     exit_price=price,
                     reason="review_close",
                     rr=actual_rr,
+                    executed_qty=executed_qty,
+                    realized_pnl=payload.pnl if payload else None,
                 )
             review_payload = ReviewClosePayload(
                 symbol=symbol,
                 side="多头" if position.side == "open_long" else "空头",
-                entry_price=position.entry,
-                close_price=price,
-                pnl=(price - position.entry) if position.side == "open_long" else (position.entry - price),
+                entry_price=payload.entry_price if payload else position.entry,
+                close_price=payload.exit_price if payload else price,
+                pnl=payload.pnl if payload else ((price - position.entry) if position.side == "open_long" else (position.entry - price)),
                 rr=actual_rr,
                 reason=f"[{self._source_tag(self.active_source == 'backup')}] {decision.reason}",
                 context=decision.context_summary or "复评触发",
@@ -883,13 +915,14 @@ class LiveOrchestrator:
         parts.append(f"{minutes}m")
         return " ".join(parts)
 
-    def _close_paper_trade(self, position_id: str, price: float, reason: str, ts: int) -> None:
+    def _close_paper_trade(self, position_id: str, price: float, reason: str, ts: int):
         trade_id = self.paper_positions.pop(position_id, None)
         if not trade_id:
-            return
+            return None
         trade = self.paper_broker.close(trade_id, price, ts, reason)
         if trade and self.db and getattr(self.db, "performance", None):
             self.db.performance.record_trade(trade, trade.trade_type, trade.market_mode)
+        return trade
 
     def _adjust_paper_trade(self, position_id: str, new_stop: float, new_take: float, note: str) -> None:
         trade_id = self.paper_positions.get(position_id)

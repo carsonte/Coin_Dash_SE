@@ -93,12 +93,13 @@ class TradingRecorder:
         if exit_price is None:
             exit_price = trade.take if trade.exit_reason == "take profit" else trade.stop
         actual_rr = trade.realized_rr if trade.realized_rr is not None else trade.rr
+        pnl_value = trade.pnl - float(getattr(trade, "open_fee", 0.0) or 0.0)
         update = {
             "run_id": run_id or self.run_id,
             "exit_price": exit_price,
             "exit_reason": trade.exit_reason,
             "exit_at": utc_now(),
-            "pnl": trade.pnl,
+            "pnl": pnl_value,
             "status": "closed",
             "rr": actual_rr,
         }
@@ -116,10 +117,17 @@ class TradingRecorder:
         exit_price: float,
         reason: str,
         rr: float,
+        executed_qty: float | None = None,
+        realized_pnl: float | None = None,
         run_id: str | None = None,
     ) -> None:
         if not self.client.enabled:
             return
+        qty = executed_qty if executed_qty is not None else 0.0
+        if realized_pnl is not None:
+            pnl_value = realized_pnl
+        else:
+            pnl_value = exit_price - entry_price if side == "open_long" else entry_price - exit_price
         payload = {
             "run_id": run_id or self.run_id,
             "trade_id": position_id,
@@ -129,13 +137,13 @@ class TradingRecorder:
             "entry_price": entry_price,
             "stop_loss": 0.0,
             "take_profit": 0.0,
-            "quantity": 0.0,
+            "quantity": qty,
             "rr": rr,
             "opened_at": utc_now(),
             "exit_price": exit_price,
             "exit_reason": reason,
             "exit_at": utc_now(),
-            "pnl": exit_price - entry_price if side == "open_long" else entry_price - exit_price,
+            "pnl": pnl_value,
             "status": "closed",
             "extra": {"source": "live"},
         }

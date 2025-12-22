@@ -1407,6 +1407,8 @@ def cmd_close_all(args: argparse.Namespace) -> None:
                         exit_price=pos.entry,
                         reason="manual_close",
                         rr=actual_rr,
+                        executed_qty=pos.qty,
+                        realized_pnl=payload.pnl,
                     )
 
 

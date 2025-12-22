@@ -17,10 +17,11 @@ class TradeMetric:
 
     def update(self, trade: Trade, rr: float) -> None:
         self.count += 1
-        if trade.pnl > 0:
+        pnl_value = trade.pnl - float(getattr(trade, "open_fee", 0.0) or 0.0)
+        if pnl_value > 0:
             self.wins += 1
         self.total_rr += rr
-        self.pnl += trade.pnl
+        self.pnl += pnl_value
 
     def snapshot(self) -> Dict[str, float]:
         return {
