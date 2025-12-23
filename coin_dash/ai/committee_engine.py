@@ -59,7 +59,8 @@ def _build_messages(symbol: str, payload: Dict[str, Any], role_hint: str) -> lis
         '  "meta": {"note": "可选的形态或结构说明"}\n'
         "}\n"
         "若价格字段不确定，可设为 null；请务必输出合法 JSON。"
-    ).format(role=role_hint)
+    )
+    prompt = prompt.replace("{role}", role_hint)
     return [
         {"role": "system", "content": prompt},
         {"role": "user", "content": f"symbol: {symbol}\nmarket_snapshot: {_json_safe(payload)}"},

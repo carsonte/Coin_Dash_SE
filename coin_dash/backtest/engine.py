@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
@@ -26,6 +27,9 @@ from ..performance.tracker import PerformanceTracker
 from ..performance.safe_mode import DailySafeMode
 from ..notify.lark import send_signal_card, send_performance_card
 from ..db import DatabaseServices
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -270,11 +274,18 @@ def _make_decision(
     feature_ctx,
     glm_result: GlmFilterResult | None = None,
 ) -> Decision:
-    def _hold(reason: str) -> Decision:
+    def _hold(reason: str, error: Optional[Exception] = None) -> Decision:
         price = feature_ctx.features.get("price_30m")
         if price is None:
             # Fallback到任一周期的价格，避免返回 0
             price = feature_ctx.features.get("price_1h", 0.0)
+        meta = {
+            "adapter": "deepseek",
+            "status": reason,
+            "glm_filter": glm_result.model_dump_safe() if glm_result else None,
+        }
+        if error:
+            meta["error"] = str(error)
         return Decision(
             decision="hold",
             entry_price=price,
@@ -283,7 +294,7 @@ def _make_decision(
             risk_reward=0.0,
             confidence=0.0,
             reason=reason,
-            meta={"adapter": "deepseek", "status": reason, "glm_filter": glm_result.model_dump_safe() if glm_result else None},
+            meta=meta,
             glm_snapshot=glm_result.model_dump_safe() if glm_result else None,
         )
 
@@ -338,8 +349,9 @@ def _make_decision(
                 ai_logger=getattr(client, "ai_logger", None),
                 llm_cfg=cfg.llm,
             )
-        except Exception:
-            return _hold("front_committee_failed")
+        except Exception as exc:
+            LOGGER.warning("front_committee_failed symbol=%s err=%s", symbol, exc)
+            return _hold("front_committee_failed", exc)
 
         if committee is None or committee.final_decision == "no-trade" or committee.final_confidence < 0.55:
             reason_msg = _committee_hold_reason(committee)
@@ -355,8 +367,9 @@ def _make_decision(
 
     try:
         decision = client.decide_trade(symbol, payload, glm_result=glm_result)
-    except Exception:
-        return _hold("deepseek_unavailable")
+    except Exception as exc:
+        LOGGER.warning("deepseek_unavailable symbol=%s err=%s", symbol, exc)
+        return _hold("deepseek_unavailable", exc)
 
     if committee_enabled and committee is not None:
         decision.meta = decision.meta or {}
