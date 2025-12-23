@@ -92,6 +92,10 @@ class LiveOrchestrator:
         self.last_quotes: Dict[str, Dict[str, float]] = {}
         self.primary_quotes: Dict[str, Dict[str, float]] = {}
         self.last_data_alert: Dict[str, datetime] = {}
+        self.ai_anomaly_enabled = bool(getattr(cfg.notifications, "ai_anomaly_enabled", False))
+        cooldown_minutes = int(getattr(cfg.notifications, "ai_anomaly_cooldown_minutes", 30) or 30)
+        self.ai_anomaly_cooldown = timedelta(minutes=max(cooldown_minutes, 0))
+        self.last_ai_alert: Dict[str, datetime] = {}
         self.active_source: str = "primary"
         self.source_fail: Dict[str, int] = {"primary": 0, "backup": 0}
         self.source_recover_ok: int = 0
@@ -308,6 +312,7 @@ class LiveOrchestrator:
         decision = _make_decision(self.cfg, self.deepseek, symbol, feature_ctx, glm_result)
         decision = apply_fallback(decision, payload=getattr(decision, "meta", {}))
         if decision.decision == "hold":
+            self._maybe_send_ai_anomaly(symbol, decision)
             if "fallback" in (decision.reason or ""):
                 self.deepseek.record_market_event(
                     {
@@ -844,6 +849,66 @@ class LiveOrchestrator:
         send_anomaly_card(self.webhook, payload)
         if self.db and self.db.system_monitor:
             self.db.system_monitor.record_event("anomaly", "high", message, {"impact": impact}, run_id=self.run_id)
+
+    def _should_send_ai_alert(self, key: str) -> bool:
+        if not self.ai_anomaly_enabled:
+            return False
+        now = datetime.now(timezone.utc)
+        last = self.last_ai_alert.get(key)
+        if last and (now - last) < self.ai_anomaly_cooldown:
+            return False
+        self.last_ai_alert[key] = now
+        return True
+
+    def _send_ai_anomaly(self, symbol: str, stage: str, reason: str, detail: str | None = None) -> None:
+        if not self.ai_anomaly_enabled:
+            return
+        key = f"{symbol}:{stage}"
+        if not self._should_send_ai_alert(key):
+            return
+        now = datetime.now(timezone.utc)
+        stage_label = {
+            "front_committee_failed": "前置门卫异常",
+            "deepseek_unavailable": "DeepSeek 不可用",
+        }.get(stage, stage)
+        impact = {
+            "front_committee_failed": "前置门卫异常，本轮未触发 DeepSeek",
+            "deepseek_unavailable": "DeepSeek 调用失败，本轮降级为观望",
+        }.get(stage, "AI 决策异常，本轮降级为观望")
+        action_hint = {
+            "front_committee_failed": "检查 AIZEX/Qwen 接口、Key 与额度",
+            "deepseek_unavailable": "检查 DEEPSEEK_API_KEY/BASE、额度与网络",
+        }.get(stage, "检查 AI 接口、Key 与网络")
+        actions = action_hint
+        if detail:
+            actions = f"{action_hint}；错误: {detail}"
+        payload = AnomalyAlertPayload(
+            event_type=f"AI异常 {symbol}: {stage_label}",
+            severity="中",
+            occurred_at=now,
+            impact=impact,
+            status="AI异常",
+            actions=actions,
+        )
+        send_anomaly_card(self.webhook, payload)
+        if self.db and self.db.system_monitor:
+            event_type = "DEEPSEEK_FAIL" if stage == "deepseek_unavailable" else "FRONT_GATE_FAIL"
+            self.db.system_monitor.record_event(
+                event_type,
+                "medium",
+                f"{symbol} {stage}",
+                {"reason": reason, "detail": detail},
+                run_id=self.run_id,
+            )
+
+    def _maybe_send_ai_anomaly(self, symbol: str, decision) -> None:
+        meta = getattr(decision, "meta", None) or {}
+        status = str(meta.get("status") or "")
+        if status not in ("front_committee_failed", "deepseek_unavailable"):
+            return
+        detail = meta.get("error")
+        reason = decision.reason or status
+        self._send_ai_anomaly(symbol, status, reason, detail)
 
     def _persist_safe_mode(self) -> None:
         if self.safe_mode:

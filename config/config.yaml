@@ -177,6 +177,8 @@ performance:
 
 notifications:
   lark_webhook: ""            # 飞书 Webhook（优先 .env）
+  ai_anomaly_enabled: true    # AI 异常卡片推送开关
+  ai_anomaly_cooldown_minutes: 30  # AI 异常同类告警冷却（分钟）
 
 log:
   level: DEBUG                # 日志级别
