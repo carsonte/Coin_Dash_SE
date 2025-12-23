@@ -22,6 +22,8 @@ def validate_latest_bar(df: pd.DataFrame, rule: TimeframeRule) -> ValidationOutp
     if df.empty or len(df) < 20:
         return ValidationOutput(df, False, False, notes)
     df = df.copy()
+    if "volume" in df.columns and not pd.api.types.is_float_dtype(df["volume"]):
+        df["volume"] = df["volume"].astype(float)
     price_replaced = False
     volume_capped = False
 
