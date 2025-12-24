@@ -22,6 +22,7 @@ Coin Dash 是一套多周期数字货币/黄金的自动化交易决策链，核
 - 开仓价格：实时行情会覆盖 AI 给的 entry（多单用 ask，空单用 bid，缺失时用 last）；会重试取价 3 次（200ms 间隔），仍缺失则跳过开仓并发观察卡。
 - 提示词调整：DeepSeek/前置门卫统一价格行为学左侧交易 + 结构优先，入场需靠近结构位（<=0.25*ATR30m）；远离结构（>0.6*ATR30m）必须观望，逆势需高 RR + 轻仓。
 - AI 异常卡片：前置门卫异常/DeepSeek 不可用会推飞书卡片，默认中等严重度；冷却可在 `notifications.ai_anomaly_cooldown_minutes` 设置（默认 30 分钟）。
+- DeepSeek 返回兼容：当字段为 null 时不再触发 `float(None)` 报错，hold 决策会用行情价兜底，避免误报为不可用。
 - 风控校验：本地价格顺序与 RR 下限检查启用，最低 RR 默认 0.75（可在 `risk.rr_bounds.min` 调整）。
 - 测试现状：`python -m pytest --disable-warnings` 全量通过；若需加载 .env，可用 `python -m dotenv run -- python -m pytest tests/test_llm_clients_smoke.py --disable-warnings --maxfail=1` 运行 LLM 冒烟。
 - 绩效统计：实时/复评平仓会写入 performance 表；StateManager 基准权益来自 `backtest.initial_equity` 并持久化，重启后统计不漂移。
