@@ -103,13 +103,22 @@ class DeepSeekClient:
                 latency_ms,
                 model_name="deepseek",
             )
+        decision_value = data.get("decision", "hold")
+        entry_price = self._to_float(data.get("entry_price"))
+        stop_loss = self._to_float(data.get("stop_loss"))
+        take_profit = self._to_float(data.get("take_profit"))
+        if decision_value == "hold":
+            fallback_price = self._price_from_payload(payload)
+            entry_price = entry_price if entry_price is not None else fallback_price
+            stop_loss = stop_loss if stop_loss is not None else fallback_price
+            take_profit = take_profit if take_profit is not None else fallback_price
         decision = Decision(
-            decision=data.get("decision", "hold"),
-            entry_price=float(data.get("entry_price", 0.0)),
-            stop_loss=float(data.get("stop_loss", 0.0)),
-            take_profit=float(data.get("take_profit", 0.0)),
-            risk_reward=float(data.get("risk_reward", 0.0)),
-            confidence=float(data.get("confidence", 0.0)),
+            decision=decision_value,
+            entry_price=entry_price if entry_price is not None else 0.0,
+            stop_loss=stop_loss if stop_loss is not None else 0.0,
+            take_profit=take_profit if take_profit is not None else 0.0,
+            risk_reward=self._to_float(data.get("risk_reward")) or 0.0,
+            confidence=self._to_float(data.get("confidence")) or 0.0,
             reason=str(data.get("reason", "")),
             position_size=self._to_float(data.get("position_size")) or 0.0,
             risk_score=self._to_float(data.get("risk_score")) or 0.0,
