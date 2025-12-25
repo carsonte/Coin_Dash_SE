@@ -197,7 +197,17 @@ def run_backtest(
         if deepseek_client:
             deepseek_client.record_open_pattern(
                 symbol,
-                f"{decision.decision} mode={feature_ctx.market_mode.name} trend={feature_ctx.trend.grade} rr={decision.risk_reward:.2f} pos={decision.position_size}",
+                {
+                    "type": "open",
+                    "symbol": symbol,
+                    "side": decision.decision,
+                    "price": decision.entry_price,
+                    "rr": decision.risk_reward,
+                    "pos": decision.position_size,
+                    "mode": feature_ctx.market_mode.name,
+                    "trend": feature_ctx.trend.grade,
+                    "time": now_dt.isoformat(),
+                },
             )
 
         opened_trade = broker.open(
