@@ -14,6 +14,7 @@ Coin Dash 是一套多周期数字货币/黄金的自动化交易决策链，核
 - 决策持久化：`ai_decisions` 记录增加 `model_name/committee_id/weight/is_final`，会落三条模型记录 + 委员会结果。
 - 通知：飞书卡片推送失败会记录 warning，发送时显式使用 UTF-8。
 - 通知：修复卡片中文乱码与异常控制字符（发送前统一清理/规范化）。
+- 回测通知：新增开关 `notifications.backtest_enabled`，可关闭回测期间的飞书卡片推送。
 - 绩效卡片：交易类型输出本地化（顺势/逆小势/逆大势/未分类）。
 - MT5 行情源：默认启用 `mt5_api`（price/ohlc），tick_volume 替换 volume，时间戳按秒对齐。
 - 行情兜底：MT5 连续 3 次失败自动降级到 CCXT 备用源（Binance USDT-M），仅用于行情/纸盘，不触发实盘；备源成功 5 轮探活后自动切回 MT5，XAU 不在备源，异常会推飞书卡片。

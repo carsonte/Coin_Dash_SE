@@ -148,6 +148,7 @@ class PerformanceCfg(BaseModel):
 class NotificationsCfg(BaseModel):
     lark_webhook: str = ""
     lark_signing_secret: str = ""
+    backtest_enabled: bool = True
     ai_anomaly_enabled: bool = False
     ai_anomaly_cooldown_minutes: int = 30
 

@@ -87,6 +87,7 @@ def run_backtest(
         raise ValueError("Cannot infer base timeframe from data")
 
     webhook = os.getenv("LARK_WEBHOOK") or cfg.notifications.lark_webhook
+    notify_enabled = bool(getattr(cfg.notifications, "backtest_enabled", True)) and bool(webhook)
 
     for idx in range(len(df)):
         window = df.iloc[: idx + 1]
@@ -191,7 +192,8 @@ def run_backtest(
         signal_mgr.add(record)
         if db_services and db_services.trading:
             db_services.trading.record_signal(record, correlated)
-        send_signal_card(webhook, record, correlated)
+        if notify_enabled:
+            send_signal_card(webhook, record, correlated)
         if deepseek_client:
             deepseek_client.record_open_pattern(
                 symbol,
@@ -225,13 +227,14 @@ def run_backtest(
         logs.append("safe mode triggered during final reconciliation")
     summary = broker.summary()
     perf_report = tracker.report()
-    send_performance_card(
-        webhook,
-        summary,
-        perf_report["modes"],
-        perf_report["types"],
-        perf_report.get("symbols", {}),
-    )
+    if notify_enabled:
+        send_performance_card(
+            webhook,
+            summary,
+            perf_report["modes"],
+            perf_report["types"],
+            perf_report.get("symbols", {}),
+        )
     return BacktestReport(summary=summary, logs=logs, modes=perf_report["modes"], trade_types=perf_report["types"])
 
 
