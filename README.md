@@ -73,8 +73,9 @@ Coin Dash 是一套多周期数字货币/黄金的自动化交易决策链，核
 
 测试
 ----
-- 全量：`python -m pytest --disable-warnings`
-- LLM 冒烟（需 .env）：`python -m dotenv run -- python scripts/smoke_llm_clients.py`
+- 日常最小回归（涉及交易逻辑/风控/绩效/AI 解析）：`python -m pytest --disable-warnings`
+- LLM 冒烟（改提示词/模型配置/LLM 客户端时，需 .env）：`python -m dotenv run -- python scripts/smoke_llm_clients.py`
+- 上线前建议：全量 pytest + 选一个 CSV 跑回测 + 实盘/模拟观察一轮日志
 
 注意
 ----
